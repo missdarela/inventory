@@ -107,29 +107,29 @@ async function createBatch() {
     const washingNumber = generateWashingNumber();
     const tableName = generateTableName(batchNumber, batchConfig.value.month, batchConfig.value.year);
     
-    const batchData = {
-      batch_number: batchNumber,
-      washing_number: washingNumber,
-      booking_no: batchConfig.value.bookingNo,
-      nxp_no: batchConfig.value.nxpNo,
-      table_name: tableName,
-      month: batchConfig.value.month,
-      year: batchConfig.value.year,
-      status: 'Active'
-    };
-
-    const { data, error } = await supabase
+    // First create the batch entry in tracking_batches
+    const { data: batchData, error: batchError } = await supabase
       .from('tracking_batches')
-      .insert(batchData)
+      .insert([{
+        batch_number: batchNumber,
+        washing_number: washingNumber,
+        booking_no: batchConfig.value.bookingNo,
+        nxp_no: batchConfig.value.nxpNo,
+        table_name: tableName,
+        month: batchConfig.value.month,
+        year: batchConfig.value.year,
+        status: 'Active',
+        created_at: new Date().toISOString()
+      }])
       .select();
 
-    if (error) throw error;
-
-    // Create 10 empty rows for the batch
+    if (batchError) throw batchError;
+    
+    // Then create the data entries in tracking_batch_data
     const batchRows = [];
     for (let i = 1; i <= 10; i++) {
       batchRows.push({
-        batch_id: data[0].id,
+        batch_id: batchData[0].id,
         serial_number: i,
         date: null,
         container_no: '',
@@ -143,7 +143,7 @@ async function createBatch() {
     }
 
     const { error: rowsError } = await supabase
-      .from('table_batch_data')
+      .from('tracking_batch_data')
       .insert(batchRows);
 
     if (rowsError) throw rowsError;
@@ -155,8 +155,8 @@ async function createBatch() {
 
     // Refresh batches and select the new one
     await loadBatches();
-    currentBatch.value = data[0];
-    await loadBatchData(data[0].id);
+    currentBatch.value = batchData[0];
+    await loadBatchData(batchData[0].id);
     
     showBatchModal.value = false;
     resetBatchConfig();
@@ -183,7 +183,7 @@ async function loadBatchData(batchId) {
   loading.value = true;
   try {
     const { data, error } = await supabase
-      .from('table_batch_data')
+      .from('tracking_batch_data')
       .select('*')
       .eq('batch_id', batchId)
       .order('serial_number');
@@ -250,7 +250,7 @@ async function saveRow(row) {
     };
 
     const { error } = await supabase
-      .from('table_batch_data')
+      .from('tracking_batch_data')
       .update(updates)
       .eq('id', row.id);
 
@@ -288,7 +288,7 @@ async function deleteRow(row) {
         };
 
         const { error } = await supabase
-          .from('table_batch_data')
+          .from('tracking_batch_data')
           .update(updates)
           .eq('id', row.id);
 

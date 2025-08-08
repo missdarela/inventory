@@ -324,11 +324,38 @@ export const useTrackingDumpStore = defineStore('trackingDump', () => {
       const timestamp = new Date().getTime();
       const randomStr = Math.random().toString(36).substring(2, 8);
       const batchId = `BATCH-${timestamp}-${randomStr}`;
+      const currentDate = new Date().toISOString().split('T')[0];
       
+      // 1. First create the batch entry in tracking_batches
+      const batchEntry = {
+        batch_id: batchId,
+        batch_name: dumpData.name,
+        created_at: new Date().toISOString(),
+        created_by: 'system', // You might want to replace this with actual user ID
+        status: 'active',
+        description: dumpData.comments || `Batch for ${dumpData.name}`,
+        total_containers: dumpData.containersDelivered || 0
+      };
+
+      console.log('Creating batch in tracking_batches:', batchEntry);
+      
+      const { data: batchData, error: batchError } = await supabase
+        .from('tracking_batches')
+        .insert([batchEntry])
+        .select();
+
+      if (batchError) {
+        console.error('Error creating batch:', batchError);
+        throw batchError;
+      }
+      
+      console.log('Batch created successfully:', batchData);
+      
+      // 2. Then create the data entry in tracking_batch_data
       const dumpEntry = {
         batch_id: batchId,
         dump: dumpData.name,
-        date: new Date().toISOString().split('T')[0],
+        date: currentDate,
         container_no: dumpData.containerNo || '',
         driver: dumpData.driver || '',
         containers_delivered: dumpData.containersDelivered || 0,
@@ -338,27 +365,28 @@ export const useTrackingDumpStore = defineStore('trackingDump', () => {
 
       console.log('Saving to tracking_batch_data:', dumpEntry);
 
-      const { data, error: insertError } = await supabase
+      const { data, error: dataError } = await supabase
         .from('tracking_batch_data')
         .insert([dumpEntry])
         .select();
 
-      if (insertError) {
-        console.error('Supabase error:', insertError);
-        throw insertError;
+      if (dataError) {
+        console.error('Error saving batch data:', dataError);
+        // Consider rolling back the batch creation if data save fails
+        throw dataError;
       }
 
-      console.log('Successfully saved dump:', data);
+      console.log('Successfully saved dump data:', data);
       
-      // Add to local state
+      // 3. Update local state
       if (data && data[0]) {
         const newDump = {
-          id: data[0].id,
+          id: batchData[0]?.id || Date.now(),
           name: data[0].dump,
           status: 'Active',
-          lastUpdated: data[0].date || new Date().toISOString().split('T')[0],
-          itemCount: 0,
-          deliveries: []
+          lastUpdated: currentDate,
+          itemCount: 1, // Since we're adding one entry
+          deliveries: [data[0]]
         };
         
         trackingDumps.value.push(newDump);
