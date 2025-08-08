@@ -42,8 +42,9 @@
       
       // Get total containers delivered from tracking data (all time)
       const { data: trackingData, error: trackingError } = await supabase
-        .from('tracking_batch_data')
-        .select('containers_delivered');
+        .from('table_batch_data')
+        .select('containers_delivered')
+        .order('date', { ascending: false });
       
       const totalContainersDelivered = trackingData?.reduce((sum, item) => sum + (parseInt(item.containers_delivered) || 0), 0) || 0;
       

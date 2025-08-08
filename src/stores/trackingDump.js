@@ -5,15 +5,15 @@ import { supabase } from '../supabase'
 export const useTrackingDumpStore = defineStore('trackingDump', () => {
   // State
   const trackingDumps = ref([
-    { id: 1, name: 'Osazz', status: 'Active', itemCount: 0, lastUpdated: null },
-    { id: 2, name: 'CAC', status: 'Active', itemCount: 0, lastUpdated: null },
-    { id: 3, name: 'Igwe', status: 'Active', itemCount: 0, lastUpdated: null },
-    { id: 4, name: 'More Grace', status: 'Active', itemCount: 0, lastUpdated: null },
-    { id: 5, name: 'Ebuka', status: 'Active', itemCount: 0, lastUpdated: null },
-    { id: 6, name: 'Papa', status: 'Active', itemCount: 0, lastUpdated: null },
-    { id: 7, name: 'France', status: 'Active', itemCount: 0, lastUpdated: null },
-    { id: 8, name: 'Victor', status: 'Active', itemCount: 0, lastUpdated: null },
-    { id: 9, name: 'Iyawo', status: 'Active', itemCount: 0, lastUpdated: null }
+    { id: 1, name: 'Osazz', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
+    { id: 2, name: 'CAC', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
+    { id: 3, name: 'Igwe', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
+    { id: 4, name: 'More Grace', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
+    { id: 5, name: 'Ebuka', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
+    { id: 6, name: 'Papa', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
+    { id: 7, name: 'France', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
+    { id: 8, name: 'Victor', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
+    { id: 9, name: 'Iyawo', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] }
   ])
 
   const deliveries = ref([])
@@ -315,6 +315,67 @@ export const useTrackingDumpStore = defineStore('trackingDump', () => {
     }
   }
 
+  async function addDump(dumpData) {
+    loading.value = true;
+    error.value = null;
+    
+    try {
+      // Generate a unique batch_id using timestamp and random string
+      const timestamp = new Date().getTime();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const batchId = `BATCH-${timestamp}-${randomStr}`;
+      
+      const dumpEntry = {
+        batch_id: batchId,
+        dump: dumpData.name,
+        date: new Date().toISOString().split('T')[0],
+        container_no: dumpData.containerNo || '',
+        driver: dumpData.driver || '',
+        containers_delivered: dumpData.containersDelivered || 0,
+        vessel_details: dumpData.vesselDetails || '',
+        comments: dumpData.comments || ''
+      };
+
+      console.log('Saving to tracking_batch_data:', dumpEntry);
+
+      const { data, error: insertError } = await supabase
+        .from('tracking_batch_data')
+        .insert([dumpEntry])
+        .select();
+
+      if (insertError) {
+        console.error('Supabase error:', insertError);
+        throw insertError;
+      }
+
+      console.log('Successfully saved dump:', data);
+      
+      // Add to local state
+      if (data && data[0]) {
+        const newDump = {
+          id: data[0].id,
+          name: data[0].dump,
+          status: 'Active',
+          lastUpdated: data[0].date || new Date().toISOString().split('T')[0],
+          itemCount: 0,
+          deliveries: []
+        };
+        
+        trackingDumps.value.push(newDump);
+        return newDump;
+      }
+      
+      return null;
+      
+    } catch (err) {
+      console.error('Failed to add dump:', err);
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   function loadFromLocalStorage() {
     const saved = localStorage.getItem('trackingDumps')
     if (saved) {
@@ -337,8 +398,81 @@ export const useTrackingDumpStore = defineStore('trackingDump', () => {
 
   // Initialize store
   async function initialize() {
-    loadFromLocalStorage()
-    await fetchAllDeliveries()
+    try {
+      loading.value = true;
+      
+      // Load dumps from Supabase
+      const { data: dumpsData, error: dumpsError } = await supabase
+        .from('tracking_dumps')
+        .select('*')
+        .order('id', { ascending: true });
+      
+      if (dumpsError) throw dumpsError;
+      
+      // If we have dumps in the database, use them
+      if (dumpsData && dumpsData.length > 0) {
+        trackingDumps.value = dumpsData.map(dump => ({
+          id: dump.id,
+          name: dump.name,
+          status: dump.status || 'Active',
+          lastUpdated: dump.last_updated || new Date().toISOString().split('T')[0],
+          itemCount: dump.item_count || 0,
+          deliveries: []
+        }));
+      } else {
+        // If no dumps in database, use default dumps
+        const defaultDumps = [
+          { name: 'Osazz' },
+          { name: 'CAC' },
+          { name: 'Igwe' },
+          { name: 'More Grace' },
+          { name: 'Ebuka' },
+          { name: 'Papa' },
+          { name: 'France' },
+          { name: 'Victor' },
+          { name: 'Iyawo' }
+        ];
+        
+        // Insert default dumps into the database
+        for (const dump of defaultDumps) {
+          const newDump = {
+            name: dump.name,
+            status: 'Active',
+            last_updated: new Date().toISOString().split('T')[0],
+            item_count: 0,
+            created_at: new Date().toISOString()
+          };
+          
+          const { data, error } = await supabase
+            .from('tracking_dumps')
+            .insert([newDump])
+            .select();
+            
+          if (error) throw error;
+          
+          // Add to local state
+          if (data && data[0]) {
+            trackingDumps.value.push({
+              id: data[0].id,
+              name: data[0].name,
+              status: data[0].status,
+              lastUpdated: data[0].last_updated,
+              itemCount: data[0].item_count,
+              deliveries: []
+            });
+          }
+        }
+      }
+      
+      // Load deliveries
+      await fetchAllDeliveries();
+      
+    } catch (error) {
+      console.error('Failed to initialize tracking dump store:', error);
+      error.value = error.message;
+    } finally {
+      loading.value = false;
+    }
   }
 
   return {
@@ -368,6 +502,7 @@ export const useTrackingDumpStore = defineStore('trackingDump', () => {
     getDumpStatistics,
     loadFromLocalStorage,
     clearError,
+    addDump,
     initialize
   }
 })

@@ -97,21 +97,27 @@ export const useInventoryDumpStore = defineStore('inventoryDump', () => {
     async function saveDumpMetadata(dumpData) {
         loading.value = true;
         try {
-            const metadataEntry = {
+            const dumpEntry = {
                 dump_name: dumpData.name,
                 status: dumpData.status,
+                deposit: 0,  
+                date: new Date().toISOString().split('T')[0],
+                rate: 0,
+                quantity_deposited: dumpData.itemCount || 0,
+                quantity_remaining: dumpData.itemCount || 0,
                 created_at: new Date().toISOString(),
-                last_updated: dumpData.lastUpdated,
-                item_count: dumpData.itemCount || 0
+                set_id: 1  
             };
 
+            console.log('Saving dump metadata:', dumpEntry);
+
             const { data, error } = await supabase
-                .from('dump_metadata')
-                .insert(metadataEntry)
+                .from('dump_inventory')
+                .insert(dumpEntry)
                 .select();
 
             if (error) {
-                console.error('Supabase metadata error:', error);
+                console.error('Error saving dump metadata:', error);
                 throw error;
             }
 

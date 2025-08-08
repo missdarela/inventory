@@ -3,12 +3,14 @@ import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTrackingDumpStore } from '../stores/trackingDump';
 import { ElNotification } from 'element-plus';
+import { supabase } from '../supabase';
 
 const router = useRouter();
 const trackingDumpStore = useTrackingDumpStore();
 const showAddModal = ref(false);
 const newDumpName = ref('');
 const searchQuery = ref('');
+const loading = ref(false);
 
 const filteredDumps = computed(() => {
   if (!searchQuery.value) return trackingDumpStore.trackingDumps;
@@ -25,84 +27,45 @@ const navigateToDumpDetails = (dumpId) => {
   router.push(`/dashboard/dump/trackingDump/${dumpId}`);
 };
 
-const addNewDump = () => {
+const addNewDump = async () => {
   if (newDumpName.value.trim()) {
-    const newId = Math.max(...trackingDumpStore.trackingDumps.map(d => d.id)) + 1;
-    const newDump = {
-      id: newId,
-      name: newDumpName.value.trim(),
-      status: 'Active',
-      lastUpdated: new Date().toLocaleDateString(),
-      deliveries: []
-    };
-    
-    trackingDumpStore.trackingDumps.push(newDump);
-    
-    newDumpName.value = '';
-    showAddModal.value = false;
-    ElNotification({
-      title: 'Success',
-      message: `New tracking dump "${newDump.name}" added successfully!`,
-      type: 'success',
-    });
-  }
-};
-
-const exportTrackingData = async () => {
-  try {
-    // Ensure we have the latest data
-    await trackingDumpStore.fetchAllDeliveries();
-    
-    // Create CSV content with statistics header
-    let csvContent = 'Tracking Dumps Export Report\n';
-    csvContent += `Generated on: ${new Date().toLocaleString()}\n`;
-    csvContent += `Total Deliveries: ${trackingDumpStore.totalDeliveries}\n`;
-    csvContent += `Total Containers: ${trackingDumpStore.totalContainers}\n`;
-    csvContent += `Total Unique Drivers: ${trackingDumpStore.uniqueDriversCount}\n\n`;
-    
-    // Add dump summary header
-    csvContent += 'Dump Name,Status,Total Deliveries,Total Containers,Unique Drivers,Last Updated\n';
-    
-    // Add dump data
-    trackingDumpStore.trackingDumps.forEach(dump => {
-      const stats = trackingDumpStore.getDumpStatistics(dump.name);
-      csvContent += `"${dump.name}","${dump.status}",${stats.totalDeliveries},${stats.totalContainers},${stats.uniqueDrivers},"${stats.lastUpdated || 'Never'}"\n`;
-    });
-    
-    // Add detailed delivery records
-    csvContent += '\nDetailed Delivery Records\n';
-    csvContent += 'Date,Container No,Driver,Dump,Containers Delivered,Vessel Details,Comments\n';
-    
-    // Add all deliveries
-    trackingDumpStore.deliveries.forEach(delivery => {
-      csvContent += `"${delivery.date || ''}","${delivery.container_no || ''}","${delivery.driver || ''}","${delivery.dump || ''}",${delivery.containers_delivered || 0},"${delivery.vessel_details || ''}","${delivery.comments || ''}"\n`;
-    });
-
-    // Create and download file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `tracking_dumps_export_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    ElNotification({
-      title: 'Export Successful',
-      message: 'Tracking dumps data exported successfully!',
-      type: 'success',
-      duration: 3000
-    });
-  } catch (error) {
-    console.error('Export error:', error);
-    ElNotification({
-      title: 'Export Failed',
-      message: 'Failed to export tracking dumps data',
-      type: 'error',
-      duration: 3000
-    });
+    try {
+      loading.value = true;
+      const dumpName = newDumpName.value.trim();
+      
+      console.log('Adding new dump with name:', dumpName);
+      
+      // Use the store's addDump method which handles batch_id generation
+      const newDump = await trackingDumpStore.addDump(dumpName);
+      
+      if (newDump) {
+        console.log('New dump created:', newDump);
+        
+        // Reset form and close modal
+        newDumpName.value = '';
+        showAddModal.value = false;
+        
+        // Show success message
+        ElNotification({
+          title: 'Success',
+          message: `New tracking dump "${dumpName}" added successfully!`,
+          type: 'success',
+        });
+      }
+      
+    } catch (error) {
+      console.error('Failed to add new tracking dump:', error);
+      const errorMessage = error.message || 'An unknown error occurred';
+      
+      ElNotification({
+        title: 'Error',
+        message: `Failed to add tracking dump: ${errorMessage}`,
+        type: 'error',
+        duration: 5000
+      });
+    } finally {
+      loading.value = false;
+    }
   }
 };
 
@@ -152,7 +115,7 @@ const totalDeliveries = computed(() => {
             <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Tracking Dumps</h1>
             <p class="mt-2 text-sm text-gray-600">Manage and view your tracking dump locations</p>
           </div>
-          <button 
+          <!-- <button 
             @click="exportTrackingData"
             class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors duration-200"
           >
@@ -160,7 +123,7 @@ const totalDeliveries = computed(() => {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
             </svg>
             Export Data
-          </button>
+          </button> -->
         </div>
       </div>
 
@@ -362,7 +325,7 @@ const totalDeliveries = computed(() => {
             </button>
             <button 
               @click="addNewDump"
-              :disabled="!newDumpName.trim()"
+              :disabled="!newDumpName.trim() || loading"
               class="flex-1 px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
             >
               Add Dump

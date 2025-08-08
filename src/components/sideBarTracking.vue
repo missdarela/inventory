@@ -143,7 +143,7 @@ async function createBatch() {
     }
 
     const { error: rowsError } = await supabase
-      .from('tracking_batch_data')
+      .from('table_batch_data')
       .insert(batchRows);
 
     if (rowsError) throw rowsError;
@@ -183,7 +183,7 @@ async function loadBatchData(batchId) {
   loading.value = true;
   try {
     const { data, error } = await supabase
-      .from('tracking_batch_data')
+      .from('table_batch_data')
       .select('*')
       .eq('batch_id', batchId)
       .order('serial_number');
@@ -250,7 +250,7 @@ async function saveRow(row) {
     };
 
     const { error } = await supabase
-      .from('tracking_batch_data')
+      .from('table_batch_data')
       .update(updates)
       .eq('id', row.id);
 
@@ -288,7 +288,7 @@ async function deleteRow(row) {
         };
 
         const { error } = await supabase
-          .from('tracking_batch_data')
+          .from('table_batch_data')
           .update(updates)
           .eq('id', row.id);
 

@@ -119,6 +119,7 @@ const addNewDump = async () => {
       // Capitalize the dump name
       const capitalizedName = inventoryDumpStore.capitalizeDumpName(newDumpName.value.trim());
       
+      // Create a new dump object
       const newId = Math.max(...dumps.value.map(d => d.id)) + 1;
       const newDump = {
         id: newId,
@@ -133,14 +134,29 @@ const addNewDump = async () => {
       
       // Add to local state
       dumps.value.push(newDump);
-      saveDumps(); // Save to localStorage as backup
+      saveDumps(); // Save to localStorage
       
+      // Reset form and close modal
       newDumpName.value = '';
       showAddModal.value = false;
-      alert(`✅ New dump "${newDump.name}" added successfully and saved to database!`);
+      
+      // Show success message
+      ElNotification({
+        title: 'Success',
+        message: `Dump "${capitalizedName}" added successfully!`,
+        type: 'success',
+      });
+      
+      // Refresh the dump counts
+      await updateAllDumpCounts();
+      
     } catch (error) {
       console.error('Failed to add new dump:', error);
-      alert(`❌ Failed to add dump: ${error.message}`);
+      ElNotification({
+        title: 'Error',
+        message: `Failed to add dump: ${error.message}`,
+        type: 'error',
+      });
     } finally {
       loading.value = false;
     }
