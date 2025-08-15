@@ -7,13 +7,13 @@ export const useReportStore = defineStore('Report', () => {
     const currentReport = ref(null);
     const loading = ref(false);
 
-    async function setReport(text) {
+    async function setReport(text, type = 'inventory') {
       loading.value = true;
       try {
         const reportData = {
           content: text,
           created_at: new Date().toISOString(),
-          type: 'inventory'
+          type: type
         };
 
         const { data, error } = await supabase
@@ -39,7 +39,6 @@ export const useReportStore = defineStore('Report', () => {
         const { data, error } = await supabase
           .from('Reports')
           .select('*')
-          .eq('type', 'inventory')
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -62,6 +61,6 @@ export const useReportStore = defineStore('Report', () => {
       loading,
       setReport,
       fetchReports,
-      setCurrentReport,
+      setCurrentReport
     };
-  });
+});

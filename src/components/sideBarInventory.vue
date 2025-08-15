@@ -1,10 +1,10 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { supabase } from '../supabase';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElNotification } from 'element-plus';
 import { useReportStore } from '../stores/reportStore';
 
-const EDIT_WINDOW_MINUTES = 3;
+const EDIT_WINDOW_MINUTES = 5;
 const inventory = ref([]);
 const loading = ref(false);
 const hasGeneratedReport = ref(false);
@@ -24,6 +24,7 @@ onMounted(async () => {
 async function fetchCurrentSet() {
   loading.value = true;
   try {
+    // Simple database query like sideBarTracking - no user_id dependency
     const { data, error } = await supabase
       .from('inventory')
       .select('*')
@@ -39,9 +40,23 @@ async function fetchCurrentSet() {
   }
 }
 
+// Manual refresh function
+const refreshData = async () => {
+  await fetchCurrentSet();
+  ElMessage.success('Data refreshed successfully');
+};
+
 const statusColorMap = {
   'In supply': 'bg-blue-500 text-white',
-  'Paid': 'bg-green-500 text-white'
+  'CAC': 'bg-green-500 text-white'
+};
+
+// Capitalize first letter of each word
+const capitalizeName = (name) => {
+  if (!name) return '';
+  return name.split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
 };
 
 function formatMoney(amount) {
@@ -66,21 +81,23 @@ function validateDateInput(event) {
 }
 
 async function addRow() {
+  const now = new Date();
+  
   const newRow = {
     dump_name: '',
     deposit: '',
-    date: new Date().toISOString().split('T')[0],
+    date: now.toISOString().split('T')[0],
     rate: '',
     quantity_deposited: 0,
     quantity_supplied: 0,
     status: 'In supply',
-    editable_until: null,
+    editable_until: null, // New rows start as editable (null means always editable until first save)
     set_id: currentSetId.value
   };
   
   loading.value = true;
   try {
-    // Add to main inventory
+    // Direct database insert like sideBarTracking
     const { data, error: inventoryError } = await supabase
       .from('inventory')
       .insert(newRow)
@@ -88,15 +105,17 @@ async function addRow() {
     
     if (inventoryError) throw inventoryError;
 
-    // Also add to dump_inventory
+    // Also add to dump_inventory for tracking
     const dumpData = {
       dump_name: newRow.dump_name,
       deposit: 0,
       date: newRow.date,
       rate: 0,
       quantity_deposited: 0,
+      total_amount_supplied: 0,
       quantity_supplied: 0,
       amount_remaining: 0,
+      quantity_remaining: 0,
       status: newRow.status,
       set_id: currentSetId.value
     };
@@ -107,7 +126,9 @@ async function addRow() {
 
     if (dumpError) throw dumpError;
 
+    // Add to local array with isEditing: true
     inventory.value.push({ ...data[0], isEditing: true });
+    ElMessage.success('New row added!');
   } catch (error) {
     ElMessage.error('Failed to add row: ' + error.message);
   } finally {
@@ -120,21 +141,21 @@ function canEdit(row) {
     return true;
   }
   const now = new Date();
-  return now < new Date(row.editable_until);
+  const editableUntil = new Date(row.editable_until);
+  const canEditResult = now < editableUntil;
+  
+  return canEditResult;
 }
 
 async function saveRow(row) {
   row.isEditing = false;
   
-  let newEditableUntil = row.editable_until;
-  if (row.editable_until === null) {
-    const now = new Date();
-    newEditableUntil = new Date(now.getTime() + EDIT_WINDOW_MINUTES * 60 * 1000).toISOString();
-  }
+  const now = new Date();
+  const newEditableUntil = new Date(now.getTime() + EDIT_WINDOW_MINUTES * 60 * 1000).toISOString();
 
   const updates = {
     id: row.id,
-    dump_name: row.dump_name,
+    dump_name: capitalizeName(row.dump_name),
     deposit: formatMoney(row.deposit),
     date: row.date,
     rate: formatMoney(row.rate),
@@ -142,12 +163,13 @@ async function saveRow(row) {
     quantity_supplied: row.quantity_supplied,
     status: row.status,
     editable_until: newEditableUntil,
-    set_id: currentSetId.value
+    set_id: currentSetId.value,
+    updated_at: new Date().toISOString()
   };
 
   loading.value = true;
   try {
-    // Update main inventory
+    // Update main inventory - this ensures cross-device sync
     const { error: inventoryError } = await supabase
       .from('inventory')
       .update(updates)
@@ -155,31 +177,47 @@ async function saveRow(row) {
     
     if (inventoryError) throw inventoryError;
 
-    // Also save to dump_inventory
+    // Also save to dump_inventory with calculated fields using upsert to avoid duplicates
     const dumpData = {
-      dump_name: row.dump_name,
+      dump_name: capitalizeName(row.dump_name),
       deposit: parseFloat(row.deposit?.toString().replace(/[^\d.]/g, '')) || 0,
       date: row.date,
       rate: parseFloat(row.rate?.toString().replace(/[^\d.]/g, '')) || 0,
       quantity_deposited: parseInt(row.quantity_deposited) || 0,
+      total_amount_supplied: parseFloat(getTotalSuppliedAmount(row).replace(/[^\d.]/g, '')) || 0,
       quantity_supplied: parseInt(row.quantity_supplied) || 0,
       amount_remaining: parseFloat(getAmountRemaining(row).replace(/[^\d.]/g, '')) || 0,
+      quantity_remaining: parseInt(getQuantityRemaining(row)) || 0,
       status: row.status,
       set_id: currentSetId.value,
       updated_at: new Date().toISOString()
     };
 
+    // Use upsert to handle both insert and update cases
     const { error: dumpError } = await supabase
       .from('dump_inventory')
-      .insert(dumpData);
+      .upsert(dumpData, { 
+        onConflict: 'dump_name,set_id,date',
+        ignoreDuplicates: false 
+      });
 
-    if (dumpError) throw dumpError;
+    if (dumpError) {
+      console.warn('Dump inventory upsert failed:', dumpError);
+      // Don't fail the main save if dump inventory fails
+    }
 
-    ElMessage.success('Row saved!');
+    ElMessage.success('Row saved! Data synced across all devices.');
+    
+    // Update local state to reflect the changes
     const index = inventory.value.findIndex(item => item.id === row.id);
     if (index !== -1) {
       inventory.value[index].editable_until = newEditableUntil;
+      inventory.value[index].updated_at = updates.updated_at;
     }
+    
+    // Optionally refresh data to ensure sync (uncomment if needed)
+    // await fetchCurrentSet();
+    
   } catch (error) {
     ElMessage.error('Failed to save row: ' + error.message);
     row.isEditing = true; // Revert to editing mode on failure
@@ -246,7 +284,7 @@ function getAmountRemaining(row) {
 function getQuantityRemaining(row) {
   const quantityDeposited = parseFloat(row.quantity_deposited?.toString().replace(/[^\d.]/g, '')) || 0;
   const quantitySupplied = parseFloat(row.quantity_supplied?.toString().replace(/[^\d.]/g, '')) || 0;
-  const remaining = quantityDeposited - quantitySupplied;
+  const remaining = quantitySupplied - quantityDeposited; // 
   return remaining >= 0 ? remaining.toString() : '0';
 }
 
@@ -283,7 +321,7 @@ async function handleGenerateReport() {
       return [
         `<h3 class="text-sm font-bold">Record #${index + 1}:</h3>`,
         `<ul class="list-disc pl-6 py-2">
-           <li class="font-medium">Dump Name:<b> ${item.dump_name}</b></li>
+           <li class="font-medium">Dump Name:<b> ${capitalizeName(item.dump_name)}</b></li>
            <li class="font-medium my-2">Date:<b> ${item.date}</b></li>
            <li class="font-medium">Deposit Made:<b> ${formatMoney(item.deposit)}</b></li>
            <li class="font-medium my-2">Container Deposited:<b> ${item.quantity_deposited}</b></li>
@@ -316,14 +354,76 @@ async function handleGenerateReport() {
     ElMessage.error('Failed to generate report: ' + error.message);
   }
 }
+
+const exportInventory = () => {
+  try {
+    // Helper function to format money for CSV (replace ₦ with NGN)
+    const formatMoneyForCSV = (amount) => {
+      if (!amount) return '';
+      const formatted = formatMoney(amount);
+      return formatted.replace('₦', 'NGN ');
+    };
+
+    // Create CSV content with summary header
+    let csvContent = `Inventory Export Report\n`;
+    csvContent += `Generated on: ${new Date().toLocaleString()}\n`;
+    csvContent += `Set ID: ${currentSetId.value}\n`;
+    csvContent += `Total Records: ${inventory.value.length}\n`;
+    csvContent += `Total Amount Supplied: ${formatMoneyForCSV(inventory.value.reduce((sum, item) => sum + (getTotalSuppliedAmount(item) || 0), 0))}\n`;
+    csvContent += `Total Amount Remaining: ${formatMoneyForCSV(inventory.value.reduce((sum, item) => sum + (getAmountRemaining(item) || 0), 0))}\n`;
+    csvContent += `Total Quantity Supplied: ${inventory.value.reduce((sum, item) => sum + (parseFloat(item.quantity_supplied) || 0), 0)}\n`;
+    csvContent += `Total Quantity Remaining: ${inventory.value.reduce((sum, item) => sum + (getQuantityRemaining(item) || 0), 0)}\n\n`;
+    
+    // Add inventory details header
+    csvContent += 'S/N,Dump Name,Deposit,Date,Rate,Quantity Deposited,Total Amount Supplied,Quantity Supplied,Amount Remaining,Quantity Remaining,Status\n';
+    
+    // Add inventory data
+    inventory.value.forEach((item, index) => {
+      csvContent += `${index + 1},"${capitalizeName(item.dump_name || '')}","${formatMoneyForCSV(item.deposit)}","${item.date || ''}","${formatMoneyForCSV(item.rate)}",${item.quantity_deposited || 0},"${formatMoneyForCSV(getTotalSuppliedAmount(item))}",${item.quantity_supplied || 0},"${formatMoneyForCSV(getAmountRemaining(item))}",${getQuantityRemaining(item) || 0},"${item.status || ''}"\n`;
+    });
+    
+    // Add UTF-8 BOM for proper encoding
+    const BOM = '\uFEFF';
+    const csvWithBOM = BOM + csvContent;
+    
+    // Create and download file with proper UTF-8 encoding
+    const blob = new Blob([csvWithBOM], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `inventory-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    // Show success notification
+    ElNotification({
+      title: 'Export Successful',
+      message: 'Inventory data has been exported to CSV with proper formatting',
+      type: 'success',
+    });
+  } catch (error) {
+    console.error('Export error:', error);
+    ElNotification({
+      title: 'Export Failed',
+      message: 'Failed to export inventory data',
+      type: 'error',
+    });
+  }
+};
 </script>
 
 <template>
   <div class="overflow-x-auto rounded-lg shadow bg-white p-4 relative">
+    <div class="py-2 text-right">
+      <button @click="handleGenerateReport" class="px-4 py-2 bg-green-700 text-white rounded hover:bg-green-800">Generate Report</button>
+    <button @click="exportInventory" class="mx-3 px-2 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-800">Export to CSV</button>
+    <button class="mx-3 px-2 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-800" @click="closeAccount">Close Account</button>
+    </div>
     <div v-if="loading" class="absolute inset-0 bg-white bg-opacity-50 flex items-center justify-center z-10">
       <p>Loading...</p>
     </div>
-    <button class="mb-4 px-4 py-2 bg-green-700 text-white rounded hover:bg-green-900" @click="addRow">Add Row</button>
     <div class="rounded-lg overflow-scroll">
       <table class="min-w-full table-fixed">
         <thead class="bg-blue-800 text-white text-sm">
@@ -347,7 +447,7 @@ async function handleGenerateReport() {
             <td class="px-2 py-2 border border-blue-200 text-xs text-center">{{ index + 1 }}</td>
             <td class="px-2 py-2 border border-blue-200 text-center">
               <input v-if="row.isEditing && canEdit(row)" v-model="row.dump_name" class="border rounded px-1 py-0.5 w-full text-sm" />
-              <span v-else>{{ row.dump_name }}</span>
+              <span v-else>{{ capitalizeName(row.dump_name) }}</span>
             </td>
             <td class="px-2 py-2 border border-blue-200 text-center">
               <input v-if="row.isEditing && canEdit(row)" v-model="row.deposit" class="border rounded px-1 py-0.5 w-full text-sm" @keydown="validateNumericInput" />
@@ -375,7 +475,7 @@ async function handleGenerateReport() {
             <td class="px-2 py-2 border border-blue-200 text-center">
               <select v-if="row.isEditing && canEdit(row)" v-model="row.status" class="border rounded px-1 py-0.5 w-full text-center text-sm">
                 <option value="In supply">In supply</option>
-                <option value="Paid">Paid</option>
+                <option value="CAC">CAC</option>
               </select>
               <span v-else class="block text-center px-2 py-1 rounded font-semibold text-sm"
                 :class="statusColorMap[row.status]"
@@ -394,7 +494,6 @@ async function handleGenerateReport() {
       </table>
     </div>
     <p class="text-xs text-red-500 mt-2">* Rows are editable and deletable for {{ EDIT_WINDOW_MINUTES }} minutes after first save.</p>
-    <button @click="handleGenerateReport" class="mt-4 px-4 py-2 bg-green-700 text-white rounded hover:bg-green-800">Generate Report</button>
-    <button class="mt-2 mx-3 px-2 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-800" @click="closeAccount">Close Account</button>
+    <button class="mb-4 px-4 py-2 bg-green-700 text-white rounded hover:bg-green-900" @click="addRow">Add Row</button>
   </div>
 </template>

@@ -31,7 +31,7 @@
                 <span class="text-sm text-gray-500">
                   {{ deliveries.length }} {{ deliveries.length === 1 ? 'delivery' : 'deliveries' }} recorded
                 </span>
-                <span v-if="trackingDumpStore.loading" class="flex items-center text-sm text-blue-600">
+                <span v-if="loading" class="flex items-center text-sm text-blue-600">
                   <div class="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-500 mr-1"></div>
                   Loading...
                 </span>
@@ -42,7 +42,7 @@
       </div>
 
       <!-- Loading State -->
-      <div v-if="trackingDumpStore.loading" class="bg-white rounded-xl shadow-lg border border-gray-200 p-12">
+      <div v-if="loading" class="bg-white rounded-xl shadow-lg border border-gray-200 p-12">
         <div class="text-center">
           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
           <p class="text-gray-600">Loading delivery data...</p>
@@ -50,7 +50,7 @@
       </div>
 
       <!-- Empty State -->
-      <div v-else-if="!trackingDumpStore.loading && deliveries.length === 0" class="bg-white rounded-xl shadow-lg border border-gray-200 p-12">
+      <div v-else-if="!loading && deliveries.length === 0" class="bg-white rounded-xl shadow-lg border border-gray-200 p-12">
         <div class="text-center">
           <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
@@ -61,7 +61,7 @@
       </div>
 
       <!-- Statistics Dashboard -->
-      <div v-if="!trackingDumpStore.loading && deliveries.length > 0" class="mb-8">
+      <div v-if="!loading && deliveries.length > 0" class="mb-8">
         <div class="bg-white rounded-xl shadow-lg border border-gray-200 p-6">
           <div class="flex items-center justify-between mb-6">
             <h2 class="text-xl font-bold text-gray-900">Delivery Statistics</h2>
@@ -135,7 +135,7 @@
       </div>
 
       <!-- Delivery Records -->
-      <div v-if="!trackingDumpStore.loading && deliveries.length > 0">
+      <div v-if="!loading && deliveries.length > 0">
         <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
             <div class="flex items-center justify-between">
@@ -217,43 +217,87 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useTrackingDumpStore } from '../stores/trackingDump';
-import { ElMessage, ElNotification } from 'element-plus';
+import { supabase } from '../supabase';
+import { ElNotification, ElMessage } from 'element-plus';
 
 const route = useRoute();
 const router = useRouter();
-const trackingDumpStore = useTrackingDumpStore();
 
 const deliveries = ref([]);
+const loading = ref(false);
+
+// Get dump name from route params - similar to DumpDetails
 const dumpName = computed(() => {
   const dumpId = parseInt(route.params.id);
-  const dump = trackingDumpStore.getDumpById(dumpId);
-  return dump ? dump.name : 'Unknown Dump';
+  
+  // Predefined dump mapping (same as trackingDump.vue)
+  const dumpMapping = {
+    1: 'Osazz',
+    2: 'CAC', 
+    3: 'Igwe',
+    4: 'More Grace',
+    5: 'Ebuka',
+    6: 'Papa',
+    7: 'France',
+    8: 'Victor',
+    9: 'Iyawo'
+  };
+  
+  return dumpMapping[dumpId] || `Custom Dump ${dumpId}`;
 });
 
-const dumpStats = ref({
-  totalDeliveries: 0,
-  totalContainers: 0,
-  uniqueDrivers: 0,
-  monthlyDeliveries: 0
+const dumpStats = computed(() => {
+  const totalDeliveries = deliveries.value.length;
+  const totalContainers = deliveries.value.reduce((sum, d) => sum + (parseInt(d.containers_delivered) || 0), 0);
+  const uniqueDrivers = new Set(deliveries.value.filter(d => d.driver).map(d => d.driver.trim())).size;
+  
+  // Get current month deliveries
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  const monthlyDeliveries = deliveries.value.filter(d => {
+    if (!d.date) return false;
+    const deliveryDate = new Date(d.date);
+    return deliveryDate.getMonth() === currentMonth && deliveryDate.getFullYear() === currentYear;
+  }).length;
+  
+  return {
+    totalDeliveries,
+    totalContainers,
+    uniqueDrivers,
+    monthlyDeliveries
+  };
 });
 
+// Fetch dump data directly from tracking_batch_data table - similar to DumpDetails
 const fetchDumpData = async () => {
   if (!dumpName.value || dumpName.value === 'Unknown Dump') return;
   
   try {
-    const stats = await trackingDumpStore.getDumpStatistics(dumpName.value);
-    deliveries.value = stats.deliveries;
-    dumpStats.value = {
-      totalDeliveries: stats.totalDeliveries,
-      totalContainers: stats.totalContainers,
-      uniqueDrivers: stats.uniqueDrivers,
-      monthlyDeliveries: stats.monthlyDeliveries
-    };
-    console.log(`Loaded ${stats.deliveries.length} deliveries for ${dumpName.value}`);
+    loading.value = true;
+    
+    // Query tracking_batch_data table filtered by dump name (case-insensitive)
+    const { data, error } = await supabase
+      .from('tracking_batch_data')
+      .select('*')
+      .ilike('dump', dumpName.value) // Case-insensitive match
+      .order('date', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching tracking data:', error);
+      ElMessage.error('Failed to load tracking data: ' + error.message);
+      deliveries.value = [];
+      return;
+    }
+    
+    deliveries.value = data || [];
+    console.log(`Loaded ${deliveries.value.length} deliveries for ${dumpName.value}`);
+    
   } catch (error) {
     console.error('Failed to fetch dump data:', error);
+    ElMessage.error('Failed to load tracking data');
     deliveries.value = [];
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -266,7 +310,7 @@ const exportDeliveries = () => {
     // Create CSV content with statistics header
     let csvContent = `${dumpName.value} Deliveries Export Report\n`;
     csvContent += `Generated on: ${new Date().toLocaleString()}\n`;
-    csvContent += `Total Deliveries: ${deliveries.value.length}\n`;
+    csvContent += `Total Deliveries: ${dumpStats.value.totalDeliveries}\n`;
     csvContent += `Total Containers: ${dumpStats.value.totalContainers}\n`;
     csvContent += `Unique Drivers: ${dumpStats.value.uniqueDrivers}\n\n`;
     
@@ -291,17 +335,15 @@ const exportDeliveries = () => {
     
     ElNotification({
       title: 'Export Successful',
-      message: `${dumpName.value} deliveries exported successfully!`,
-      type: 'success',
-      duration: 3000
+      message: `${dumpName.value} deliveries exported successfully`,
+      type: 'success'
     });
   } catch (error) {
-    console.error('Export error:', error);
+    console.error('Export failed:', error);
     ElNotification({
       title: 'Export Failed',
-      message: 'Failed to export deliveries data',
-      type: 'error',
-      duration: 3000
+      message: 'Failed to export deliveries',
+      type: 'error'
     });
   }
 };
@@ -320,8 +362,7 @@ const formatNumber = (value) => {
   return new Intl.NumberFormat('en-US').format(value);
 };
 
-onMounted(async () => {
-  await trackingDumpStore.initialize();
-  await fetchDumpData();
+onMounted(() => {
+  fetchDumpData();
 });
 </script>

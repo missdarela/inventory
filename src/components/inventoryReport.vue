@@ -86,6 +86,70 @@ function printReport(report) {
   }, 250);
 }
 
+function downloadReport(report) {
+  // Create HTML content for download
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Inventory Report - ${formatDate(report.created_at)}</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+          }
+          .report-header {
+            border-bottom: 2px solid #16a34a;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+          }
+          .report-date {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+          }
+          h3 {
+            color: #16a34a;
+            margin-top: 0;
+          }
+          ul {
+            list-style-type: disc;
+            margin-left: 20px;
+          }
+          li {
+            margin: 8px 0;
+          }
+          hr {
+            border: 1px solid #e5e7eb;
+            margin: 20px 0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="report-header">
+          <h1>Inventory Report</h1>
+          <div class="report-date">Generated at: ${formatDate(report.created_at)}</div>
+        </div>
+        ${report.content}
+      </body>
+    </html>
+  `;
+
+  // Create and download the file
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `inventory-report-${new Date(report.created_at).toISOString().split('T')[0]}.html`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
 const groupedReports = computed(() => {
   const groups = {};
   if (reportStore.Reports) {
@@ -166,9 +230,15 @@ const sortedDates = computed(() => {
               <div class="mt-4 flex justify-end">
                 <button 
                   @click="printReport(report)"
-                  class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center"
+                  class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center mr-2"
                 >
                   <span class="mr-2">🖨️</span> Print Report
+                </button>
+                <button 
+                  @click="downloadReport(report)"
+                  class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
+                >
+                  <span class="mr-2">📁</span> Download Report
                 </button>
               </div>
             </div>

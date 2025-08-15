@@ -420,6 +420,30 @@ export const useTrackingDumpStore = defineStore('trackingDump', () => {
     console.log('Tracking dumps loaded:', trackingDumps.value.length)
   }
 
+  // Delete dump function
+  async function deleteDump(dumpId) {
+    try {
+      loading.value = true;
+      
+      // Remove dump from local state
+      const dumpIndex = trackingDumps.value.findIndex(dump => dump.id === dumpId);
+      if (dumpIndex > -1) {
+        trackingDumps.value.splice(dumpIndex, 1);
+        
+        // Save updated dumps to localStorage
+        localStorage.setItem('trackingDumps', JSON.stringify(trackingDumps.value));
+      }
+      
+      return true;
+    } catch (err) {
+      console.error('Error deleting dump:', err);
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   function clearError() {
     error.value = null
   }
@@ -529,8 +553,9 @@ export const useTrackingDumpStore = defineStore('trackingDump', () => {
     updateDumpCounts,
     getDumpStatistics,
     loadFromLocalStorage,
-    clearError,
     addDump,
+    deleteDump,
+    clearError,
     initialize
   }
 })

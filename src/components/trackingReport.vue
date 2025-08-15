@@ -8,30 +8,16 @@
       </div>
       <h1 class="text-3xl text-blue-700 font-bold mb-6">Tracking Reports</h1>
       
-      <div v-if="trackingDumpStore.loading" class="text-center py-8">
+      <div v-if="reportStore.loading" class="text-center py-8">
         Loading reports...
       </div>
       
       <div v-else-if="trackingReports.length === 0" class="text-center py-8 text-gray-500">
         <p class="mb-4">No reports have been generated yet.</p>
-        <button 
-          @click="generateReport"
-          class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          Generate First Report
-        </button>
+        <p class="text-sm">Reports are automatically generated when you use the tracking system.</p>
       </div>
       
       <div v-else class="space-y-4">
-        <div class="mb-4 flex justify-end">
-          <button 
-            @click="generateReport"
-            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Generate New Report
-          </button>
-        </div>
-        
         <div v-for="date in sortedDates" :key="date" class="border rounded-lg overflow-hidden">
           <button 
             @click="toggleDate(date)"
@@ -56,7 +42,13 @@
                 </h3>
               </div>
               <div class="text-sm text-gray-700 bg-gray-50 p-4 rounded" v-html="report.content"></div>
-              <div class="mt-4 flex justify-end">
+              <div class="mt-4 flex justify-end space-x-2">
+                <button 
+                  @click="downloadReport(report)"
+                  class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center"
+                >
+                  <span class="mr-2">📥</span> Download
+                </button>
                 <button 
                   @click="printReport(report)"
                   class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
@@ -74,76 +66,17 @@
 
 <script setup>
 import { useTrackingDumpStore } from '../stores/trackingDump';
+import { useReportStore } from '../stores/reportStore';
 import { useRouter } from 'vue-router';
 import { onMounted, computed, ref } from 'vue';
 
 const trackingDumpStore = useTrackingDumpStore();
+const reportStore = useReportStore();
 const router = useRouter();
 const expandedDates = ref(new Set());
 
-// Sample tracking reports data (similar to inventory reports)
-const trackingReports = ref([
-  {
-    id: 1,
-    created_at: '2024-01-15T10:30:00Z',
-    content: `
-      <h3>Weekly Tracking Summary</h3>
-      <p><strong>Period:</strong> January 8-14, 2024</p>
-      <p><strong>Total Deliveries:</strong> 45</p>
-      <p><strong>Total Containers:</strong> 180</p>
-      <p><strong>Active Dumps:</strong> 9</p>
-      <p><strong>Unique Drivers:</strong> 12</p>
-      <hr>
-      <h4>Top Performing Dumps:</h4>
-      <ul>
-        <li>Osazz - 8 deliveries, 32 containers</li>
-        <li>CAC - 7 deliveries, 28 containers</li>
-        <li>Igwe - 6 deliveries, 24 containers</li>
-      </ul>
-    `
-  },
-  {
-    id: 2,
-    created_at: '2024-01-01T09:15:00Z',
-    content: `
-      <h3>Monthly Tracking Report</h3>
-      <p><strong>Period:</strong> December 2023</p>
-      <p><strong>Total Deliveries:</strong> 156</p>
-      <p><strong>Total Containers:</strong> 624</p>
-      <p><strong>Active Dumps:</strong> 9</p>
-      <p><strong>Unique Drivers:</strong> 18</p>
-      <hr>
-      <h4>Monthly Statistics:</h4>
-      <ul>
-        <li>Average deliveries per day: 5.2</li>
-        <li>Average containers per delivery: 4.0</li>
-        <li>Most active driver: John Smith (23 deliveries)</li>
-      </ul>
-    `
-  },
-  {
-    id: 3,
-    created_at: '2024-01-01T14:45:00Z',
-    content: `
-      <h3>End of Day Summary</h3>
-      <p><strong>Date:</strong> January 1, 2024</p>
-      <p><strong>Daily Deliveries:</strong> 8</p>
-      <p><strong>Daily Containers:</strong> 32</p>
-      <p><strong>Active Drivers:</strong> 5</p>
-      <hr>
-      <h4>Delivery Breakdown by Dump:</h4>
-      <ul>
-        <li>Osazz - 2 deliveries</li>
-        <li>CAC - 2 deliveries</li>
-        <li>More Grace - 1 delivery</li>
-        <li>Papa - 2 deliveries</li>
-        <li>Victor - 1 delivery</li>
-      </ul>
-    `
-  }
-]);
-
 onMounted(async () => {
+  await reportStore.fetchReports();
   await trackingDumpStore.initialize();
 });
 
@@ -169,6 +102,70 @@ function formatDateKey(dateString) {
   });
 }
 
+function downloadReport(report) {
+  // Create HTML content for download
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Tracking Report - ${formatDate(report.created_at)}</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+          }
+          .report-header {
+            border-bottom: 2px solid #2563eb;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+          }
+          .report-date {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+          }
+          h3 {
+            color: #2563eb;
+            margin-top: 0;
+          }
+          ul {
+            list-style-type: disc;
+            margin-left: 20px;
+          }
+          li {
+            margin: 8px 0;
+          }
+          hr {
+            border: 1px solid #e5e7eb;
+            margin: 20px 0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="report-header">
+          <h1>Tracking Report</h1>
+          <div class="report-date">Generated at: ${formatDate(report.created_at)}</div>
+        </div>
+        ${report.content}
+      </body>
+    </html>
+  `;
+
+  // Create and download the file
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `tracking-report-${new Date(report.created_at).toISOString().split('T')[0]}.html`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
 function printReport(report) {
   // Create a new window for printing
   const printWindow = window.open('', '_blank');
@@ -184,29 +181,54 @@ function printReport(report) {
             padding: 20px;
             line-height: 1.6;
           }
-          h1, h2, h3 { color: #2563eb; }
-          .header { border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 20px; }
-          .content { margin: 20px 0; }
-          ul { margin: 10px 0; padding-left: 20px; }
-          hr { margin: 15px 0; border: 1px solid #e5e7eb; }
+          .report-date {
+            color: #444;
+            margin-bottom: 20px;
+          }
+          ul {
+            list-style-type: disc;
+            margin-left: 20px;
+          }
+          li {
+            margin: 8px 0;
+          }
+          @media print {
+            body {
+              padding: 0;
+            }
+            button {
+              display: none;
+            }
+          }
         </style>
       </head>
       <body>
-        <div class="header">
-          <h1>Tracking Report</h1>
-          <p>Generated on: ${formatDate(report.created_at)}</p>
+        <div class="report-date">
+          Generated at: ${formatDate(report.created_at)}
         </div>
-        <div class="content">
-          ${report.content}
-        </div>
+        ${report.content}
       </body>
     </html>
   `);
   
-  // Close the document and print
+  // Close the document writing and trigger print
   printWindow.document.close();
-  printWindow.print();
+  printWindow.focus();
+  setTimeout(() => {
+    printWindow.print();
+  }, 250);
 }
+
+// Get tracking reports from the store
+const trackingReports = computed(() => {
+  if (reportStore.Reports) {
+    // Filter for tracking reports only
+    return reportStore.Reports.filter(report => 
+      report.type === 'tracking' || (report.content && report.content.includes('Tracking Report'))
+    );
+  }
+  return [];
+});
 
 // Group reports by date
 const groupedReports = computed(() => {
@@ -236,35 +258,4 @@ const sortedDates = computed(() => {
     new Date(b) - new Date(a)
   );
 });
-
-// Generate new report function
-const generateReport = async () => {
-  try {
-    await trackingDumpStore.fetchAllDeliveries();
-    
-    const newReport = {
-      id: trackingReports.value.length + 1,
-      created_at: new Date().toISOString(),
-      content: `
-        <h3>Generated Tracking Report</h3>
-        <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()}</p>
-        <p><strong>Total Deliveries:</strong> ${trackingDumpStore.totalDeliveries}</p>
-        <p><strong>Total Containers:</strong> ${trackingDumpStore.totalContainers}</p>
-        <p><strong>Total Dumps:</strong> ${trackingDumpStore.trackingDumps?.length || 0}</p>
-        <p><strong>Unique Drivers:</strong> ${trackingDumpStore.uniqueDriversCount}</p>
-        <hr>
-        <h4>Active Dumps:</h4>
-        <ul>
-          ${trackingDumpStore.trackingDumps?.map(dump => 
-            `<li>${dump.name} - ${dump.status}</li>`
-          ).join('') || '<li>No dumps available</li>'}
-        </ul>
-      `
-    };
-    
-    trackingReports.value.unshift(newReport);
-  } catch (error) {
-    console.error('Error generating report:', error);
-  }
-};
 </script>

@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useInventoryDumpStore } from '../stores/inventoryDumpStore';
 import { ElNotification } from 'element-plus';
+import { supabase } from '../supabase';
 
 const router = useRouter();
 const inventoryDumpStore = useInventoryDumpStore();
@@ -12,14 +13,138 @@ const newDumpName = ref('');
 const searchQuery = ref('');
 const loading = ref(false);
 
-// Initialize dumps from localStorage or default data
-const initializeDumps = () => {
-  const savedDumps = localStorage.getItem('inventoryDumps');
-  if (savedDumps) {
-    return JSON.parse(savedDumps);
-  }
+// Get consistent dump ID based on dump name (case-insensitive)
+const getDumpIdByName = (dumpName) => {
+  const dumpMapping = {
+    'heartland': 1,
+    'wireline': 2,
+    'ada': 3,
+    'oga remy': 4,
+    'pastor (remy)': 5,
+    'ebuka': 6,
+    'more grace': 7,
+    'ndony': 8,
+    'papa': 9,
+    'nkechi': 10,
+    'rugged pastor': 11,
+    'madam iyawo': 12,
+    'azuke': 13,
+    'chigozie': 14,
+    'francis fm': 15,
+    'igwe': 16,
+    'victor amadi': 17,
+    'madam joy': 18,
+    'cac': 19
+  };
   
-  // Default dumps
+  // Normalize dump name to lowercase for consistent mapping
+  const normalizedName = dumpName.toLowerCase().trim();
+  
+  // Return predefined ID or generate new ID for custom dumps
+  return dumpMapping[normalizedName] || (Object.keys(dumpMapping).length + 1);
+};
+
+// Normalize dump name for consistent capitalization
+const normalizeDumpName = (dumpName) => {
+  if (!dumpName) return '';
+  
+  // Convert to proper case (first letter of each word capitalized)
+  return dumpName
+    .toLowerCase()
+    .split(' ')
+    .map(word => {
+      // Handle special cases
+      if (word === 'fm') return 'FM';
+      if (word === 'cac') return 'CAC';
+      if (word.includes('(') || word.includes(')')) {
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+};
+
+// Initialize dumps from database instead of localStorage
+const initializeDumps = async () => {
+  try {
+    loading.value = true;
+    
+    // Start with all predefined dumps
+    const predefinedDumps = getDefaultDumps();
+    const allDumps = new Map();
+    let nextCustomId = 20; // Start custom IDs from 20
+    
+    // Add all predefined dumps first
+    predefinedDumps.forEach(dump => {
+      const lowerKey = dump.name.toLowerCase();
+      allDumps.set(lowerKey, {
+        id: dump.id,
+        name: dump.name,
+        status: 'Active',
+        lastUpdated: new Date().toISOString().split('T')[0],
+        itemCount: 0
+      });
+    });
+    
+    // Load existing dump names from inventory table to check for custom dumps
+    const { data, error } = await supabase
+      .from('inventory')
+      .select('dump_name, status, updated_at, created_at')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.warn('Error loading dumps from database:', error);
+      // Return predefined dumps if database fails
+      return predefinedDumps;
+    }
+    
+    if (data && data.length > 0) {
+      // Check for custom dumps not in predefined list
+      data.forEach((item) => {
+        const rawDumpName = item.dump_name;
+        if (rawDumpName) {
+          const normalizedName = normalizeDumpName(rawDumpName);
+          const lowerKey = normalizedName.toLowerCase();
+          
+          // If this is a custom dump (not in predefined list), add it
+          if (!allDumps.has(lowerKey)) {
+            allDumps.set(lowerKey, {
+              id: nextCustomId++, // Assign unique incremental ID
+              name: normalizedName,
+              status: item.status || 'Active',
+              lastUpdated: item.updated_at ? item.updated_at.split('T')[0] : item.created_at.split('T')[0],
+              itemCount: 0
+            });
+          } else {
+            // Update existing predefined dump with latest info
+            const existingDump = allDumps.get(lowerKey);
+            existingDump.status = item.status || existingDump.status;
+            existingDump.lastUpdated = item.updated_at ? item.updated_at.split('T')[0] : item.created_at.split('T')[0];
+          }
+        }
+      });
+    }
+    
+    const dumpsArray = Array.from(allDumps.values());
+    
+    // Sort by ID to maintain consistent order
+    dumpsArray.sort((a, b) => a.id - b.id);
+    
+    console.log(`Loaded ${dumpsArray.length} dumps (${predefinedDumps.length} predefined + ${dumpsArray.length - predefinedDumps.length} custom):`, 
+      dumpsArray.map(d => `${d.name} (ID: ${d.id})`));
+    
+    return dumpsArray;
+    
+  } catch (error) {
+    console.error('Failed to initialize dumps:', error);
+    return getDefaultDumps();
+  } finally {
+    loading.value = false;
+  }
+};
+
+// Get default dump list
+const getDefaultDumps = () => {
   return [
     { id: 1, name: 'Heartland', status: 'Active', lastUpdated: '2024-12-24', itemCount: 0 },
     { id: 2, name: 'Wireline', status: 'Active', lastUpdated: '2024-12-23', itemCount: 0 },
@@ -43,7 +168,36 @@ const initializeDumps = () => {
   ];
 };
 
-const dumps = ref(initializeDumps());
+// Create default dumps in database
+const createDefaultDumpsInDatabase = async (defaultDumps) => {
+  try {
+    const dumpEntries = defaultDumps.map(dump => ({
+      dump_name: dump.name,
+      status: dump.status,
+      item_count: dump.itemCount,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }));
+    
+    const { error } = await supabase
+      .from('inventory_dumps')
+      .insert(dumpEntries);
+    
+    if (error) {
+      console.error('Error creating default dumps:', error);
+    }
+  } catch (error) {
+    console.error('Failed to create default dumps:', error);
+  }
+};
+
+const dumps = ref([]);
+
+// Remove localStorage dependency - load from database only
+const loadDumps = async () => {
+  dumps.value = await initializeDumps();
+  await updateAllDumpCounts();
+};
 
 const filteredDumps = computed(() => {
   if (!searchQuery.value) return dumps.value;
@@ -69,41 +223,50 @@ const navigateToDumpDetails = async (dumpId) => {
   }
 };
 
-// Save dumps to localStorage
-const saveDumps = () => {
-  localStorage.setItem('inventoryDumps', JSON.stringify(dumps.value));
-};
-
-// Fetch real item count from Supabase for a dump
-const fetchDumpItemCount = async (dumpName) => {
-  try {
-    const data = await inventoryDumpStore.fetchDumpsByName(dumpName);
-    return data ? data.length : 0;
-  } catch (error) {
-    console.error(`Failed to fetch item count for ${dumpName}:`, error);
-    return 0;
-  }
-};
-
-// Update all dump item counts from Supabase
+// Optimized function to update all dump counts in one query
 const updateAllDumpCounts = async () => {
   loading.value = true;
   try {
-    for (const dump of dumps.value) {
-      const itemCount = await fetchDumpItemCount(dump.name);
-      dump.itemCount = itemCount;
-      
-      // Update last updated date if there are items
-      if (itemCount > 0) {
-        const data = await inventoryDumpStore.fetchDumpsByName(dump.name);
-        if (data && data.length > 0) {
-          // Find the most recent entry
-          const sortedData = data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-          dump.lastUpdated = new Date(sortedData[0].created_at).toISOString().split('T')[0];
-        }
-      }
+    // Fetch all dump inventory data in one query
+    const { data: allInventoryData, error } = await supabase
+      .from('inventory')
+      .select('dump_name, created_at')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching dump data:', error);
+      return;
     }
-    saveDumps(); // Save updated counts to localStorage
+    
+    // Group data by dump name and count items
+    const dumpCounts = {};
+    const dumpLastUpdated = {};
+    
+    if (allInventoryData) {
+      allInventoryData.forEach(item => {
+        const dumpName = item.dump_name;
+        if (dumpName) {
+          // Count items
+          dumpCounts[dumpName] = (dumpCounts[dumpName] || 0) + 1;
+          
+          // Track most recent update (first item due to ordering)
+          if (!dumpLastUpdated[dumpName]) {
+            dumpLastUpdated[dumpName] = new Date(item.created_at).toISOString().split('T')[0];
+          }
+        }
+      });
+    }
+    
+    // Update dump counts and last updated dates
+    dumps.value.forEach(dump => {
+      dump.itemCount = dumpCounts[dump.name] || 0;
+      if (dumpLastUpdated[dump.name]) {
+        dump.lastUpdated = dumpLastUpdated[dump.name];
+      }
+    });
+    
+    console.log('Updated dump counts:', dumpCounts);
+    
   } catch (error) {
     console.error('Failed to update dump counts:', error);
   } finally {
@@ -117,24 +280,35 @@ const addNewDump = async () => {
       loading.value = true;
       
       // Capitalize the dump name
-      const capitalizedName = inventoryDumpStore.capitalizeDumpName(newDumpName.value.trim());
+      const capitalizedName = normalizeDumpName(newDumpName.value.trim());
       
-      // Create a new dump object
-      const newId = Math.max(...dumps.value.map(d => d.id)) + 1;
-      const newDump = {
-        id: newId,
-        name: capitalizedName,
+      // Save directly to database - inventory table
+      const dumpEntry = {
+        dump_name: capitalizedName,
         status: 'Active',
-        lastUpdated: new Date().toISOString().split('T')[0],
-        itemCount: 0
+        item_count: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
       
-      // Save to database
-      await inventoryDumpStore.saveDumpMetadata(newDump);
+      const { data, error } = await supabase
+        .from('inventory')
+        .insert(dumpEntry)
+        .select()
+        .single();
       
-      // Add to local state
+      if (error) throw error;
+      
+      // Convert to component format and add to local state
+      const newDump = {
+        id: getDumpIdByName(capitalizedName), // Use consistent ID mapping
+        name: data.dump_name,
+        status: data.status,
+        lastUpdated: data.updated_at.split('T')[0],
+        itemCount: data.item_count || 0
+      };
+      
       dumps.value.push(newDump);
-      saveDumps(); // Save to localStorage
       
       // Reset form and close modal
       newDumpName.value = '';
@@ -143,7 +317,7 @@ const addNewDump = async () => {
       // Show success message
       ElNotification({
         title: 'Success',
-        message: `Dump "${capitalizedName}" added successfully!`,
+        message: `Dump "${capitalizedName}" added successfully and synced across all devices!`,
         type: 'success',
       });
       
@@ -168,9 +342,81 @@ const closeModal = () => {
   newDumpName.value = '';
 };
 
+const refreshDumpData = async () => {
+  await updateAllDumpCounts();
+};
+
+// Delete dump function
+const deleteDump = async (dumpId, dumpName, event) => {
+  // Prevent card click event when delete button is clicked
+  event.stopPropagation();
+  
+  // Show confirmation dialog
+  const confirmed = window.confirm(`Are you sure you want to delete "${dumpName}"?\n\nWarning: This will also delete all inventory data associated with this dump. This action cannot be undone.`);
+  
+  if (!confirmed) {
+    return;
+  }
+  
+  try {
+    loading.value = true;
+    
+    // Delete all inventory data for this dump from database
+    const { error: inventoryError } = await supabase
+      .from('inventory')
+      .delete()
+      .eq('dump_name', dumpName);
+    
+    if (inventoryError) {
+      console.error('Error deleting inventory data:', inventoryError);
+      ElNotification({
+        title: 'Error',
+        message: 'Failed to delete inventory data for this dump',
+        type: 'error'
+      });
+      return;
+    }
+    
+    // For predefined dumps, don't remove from local state - they should remain available
+    // For custom dumps, remove from local state
+    const dumpIndex = dumps.value.findIndex(dump => dump.id === dumpId);
+    if (dumpIndex > -1) {
+      const dump = dumps.value[dumpIndex];
+      // Only remove custom dumps (ID >= 20) from the list
+      if (dump.id >= 20) {
+        dumps.value.splice(dumpIndex, 1);
+      } else {
+        // For predefined dumps, just reset their data
+        dump.itemCount = 0;
+        dump.lastUpdated = new Date().toISOString().split('T')[0];
+        dump.status = 'Active';
+      }
+    }
+    
+    ElNotification({
+      title: 'Success',
+      message: `Dump "${dumpName}" and all associated data deleted successfully and synced across all devices!`,
+      type: 'success'
+    });
+    
+    // Refresh data to update counts and sync across devices
+    await refreshDumpData();
+    
+  } catch (error) {
+    console.error('Error deleting dump:', error);
+    ElNotification({
+      title: 'Error',
+      message: 'Failed to delete dump: ' + error.message,
+      type: 'error'
+    });
+  } finally {
+    loading.value = false;
+  }
+};
+
 // Load real data when component mounts
 onMounted(async () => {
-  await updateAllDumpCounts();
+  await loadDumps();
 });
 </script>
 
@@ -200,7 +446,18 @@ onMounted(async () => {
             </div>
           </div>
           
-          <div class="mt-4 sm:mt-0">
+          <div class="mt-4 sm:mt-0 flex space-x-3">
+            <button 
+              @click="refreshDumpData"
+              :disabled="loading"
+              class="inline-flex items-center justify-center px-4 py-3 border border-gray-300 text-sm font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Refresh dump data"
+            >
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" :class="{ 'animate-spin': loading }">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+              </svg>
+              {{ loading ? 'Refreshing...' : 'Refresh' }}
+            </button>
             <button 
               @click="showAddModal = true"
               :disabled="loading"
@@ -296,7 +553,7 @@ onMounted(async () => {
       </div>
 
       <!-- Dumps Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div 
           v-for="dump in filteredDumps" 
           :key="dump.id"
@@ -318,15 +575,15 @@ onMounted(async () => {
               </div>
               
               <div class="flex items-center">
-                <span 
-                  :class="{
-                    'bg-green-100 text-green-800': dump.status === 'Active',
-                    'bg-red-100 text-red-800': dump.status === 'Inactive'
-                  }"
-                  class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+               
+                <button 
+                  @click="deleteDump(dump.id, dump.name, $event)"
+                  class="ml-2 text-red-500 hover:text-red-700 transition-colors duration-200"
                 >
-                  {{ dump.status }}
-                </span>
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                  </svg>
+                </button>
               </div>
             </div>
             

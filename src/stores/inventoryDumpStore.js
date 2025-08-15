@@ -51,13 +51,16 @@ export const useInventoryDumpStore = defineStore('inventoryDump', () => {
     async function fetchDumpsByName(dumpName) {
         loading.value = true;
         try {
+            // Fetch from inventory table (where sideBarInventory saves data)
             const { data, error } = await supabase
-                .from('dump_inventory')
+                .from('inventory')
                 .select('*')
                 .eq('dump_name', dumpName)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
+            
+            console.log(`Found ${data?.length || 0} inventory records for dump: ${dumpName}`);
             return data;
         } catch (error) {
             console.error('Failed to fetch dumps:', error);

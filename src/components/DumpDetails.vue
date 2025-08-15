@@ -35,6 +35,15 @@
                   <div class="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-500 mr-1"></div>
                   Loading...
                 </span>
+                <button 
+                  @click="exportDumpData" 
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors duration-200"
+                >
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                  </svg>
+                  Export to CSV
+                </button>
               </div>
             </div>
           </div>
@@ -71,12 +80,7 @@
               <div class="flex items-center justify-between">
                 <div>
                   <p class="text-sm font-medium text-blue-600">Total Amount Supplied</p>
-                  <p class="text-2xl font-bold text-blue-900">{{ formatCurrency(totalAmountSupplied) }}</p>
-                </div>
-                <div class="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
-                  <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"></path>
-                  </svg>
+                  <p class="text-2xl font-bold text-blue-900">{{ formatLargeNumber(totalAmountSupplied) }}</p>
                 </div>
               </div>
             </div>
@@ -86,12 +90,7 @@
               <div class="flex items-center justify-between">
                 <div>
                   <p class="text-sm font-medium text-green-600">Amount Remaining</p>
-                  <p class="text-2xl font-bold text-green-900">{{ formatCurrency(totalAmountRemaining) }}</p>
-                </div>
-                <div class="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center">
-                  <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                  </svg>
+                  <p class="text-2xl font-bold text-green-900">{{ formatLargeNumber(totalAmountRemaining) }}</p>
                 </div>
               </div>
             </div>
@@ -103,11 +102,6 @@
                   <p class="text-sm font-medium text-purple-600">Quantity Supplied</p>
                   <p class="text-2xl font-bold text-purple-900">{{ formatNumber(totalQuantitySupplied) }}</p>
                 </div>
-                <div class="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center">
-                  <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
-                  </svg>
-                </div>
               </div>
             </div>
             
@@ -118,30 +112,8 @@
                   <p class="text-sm font-medium text-orange-600">Quantity Remaining</p>
                   <p class="text-2xl font-bold text-orange-900">{{ formatNumber(totalQuantityRemaining) }}</p>
                 </div>
-                <div class="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center">
-                  <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
-                  </svg>
-                </div>
               </div>
             </div>
-          </div>
-          
-          <!-- Overall Progress Bar -->
-          <div class="mt-6 p-4 bg-gray-50 rounded-lg">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-sm font-medium text-gray-700">Overall Usage Progress</span>
-              <span class="text-sm font-bold text-gray-900">{{ overallProgress }}%</span>
-            </div>
-            <div class="w-full bg-gray-200 rounded-full h-3">
-              <div 
-                class="bg-gradient-to-r from-blue-500 to-green-500 h-3 rounded-full transition-all duration-500"
-                :style="{ width: overallProgress + '%' }"
-              ></div>
-            </div>
-            <p class="text-xs text-gray-500 mt-2">
-              {{ formatCurrency(totalAmountSupplied - totalAmountRemaining) }} used out of {{ formatCurrency(totalAmountSupplied) }} total
-            </p>
           </div>
         </div>
       </div>
@@ -167,18 +139,6 @@
                   <p class="text-sm text-gray-500">{{ item.date || 'No date specified' }}</p>
                 </div>
               </div>
-              
-              <span 
-                :class="{
-                  'bg-green-100 text-green-800 border-green-200': item.status === 'In Stock',
-                  'bg-red-100 text-red-800 border-red-200': item.status === 'Out of Stock',
-                  'bg-yellow-100 text-yellow-800 border-yellow-200': item.status === 'Low Stock',
-                  'bg-gray-100 text-gray-800 border-gray-200': !item.status
-                }"
-                class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border"
-              >
-                {{ item.status || 'Unknown' }}
-              </span>
             </div>
 
             <!-- Card Content Grid -->
@@ -200,12 +160,12 @@
                   
                   <div class="flex justify-between items-center">
                     <span class="text-sm text-gray-600">Total Amount Supplied</span>
-                    <span class="text-sm font-semibold text-blue-600">{{ formatCurrency(item.total_amount_supplied) }}</span>
+                    <span class="text-sm font-semibold text-blue-600">{{ formatLargeNumber(item.total_amount_supplied) }}</span>
                   </div>
                   
                   <div class="flex justify-between items-center">
                     <span class="text-sm text-gray-600">Amount Remaining</span>
-                    <span class="text-sm font-semibold text-green-600">{{ formatCurrency(item.amount_remaining) }}</span>
+                    <span class="text-sm font-semibold text-green-600">{{ formatLargeNumber(item.amount_remaining) }}</span>
                   </div>
                 </div>
               </div>
@@ -250,20 +210,7 @@
                       ></div>
                     </div>
                   </div>
-                  
-                  <!-- Status Indicator -->
-                  <div class="flex items-center space-x-2">
-                    <div 
-                      :class="{
-                        'bg-green-500': item.status === 'In Stock',
-                        'bg-red-500': item.status === 'Out of Stock',
-                        'bg-yellow-500': item.status === 'Low Stock',
-                        'bg-gray-500': !item.status
-                      }"
-                      class="w-3 h-3 rounded-full"
-                    ></div>
-                    <span class="text-sm text-gray-600">Current Status</span>
-                  </div>
+          
                 </div>
               </div>
             </div>
@@ -278,6 +225,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useInventoryDumpStore } from '../stores/inventoryDumpStore';
+import { ElNotification } from 'element-plus';
 
 const route = useRoute();
 const router = useRouter();
@@ -286,33 +234,43 @@ const inventoryDumpStore = useInventoryDumpStore();
 const dumpData = ref([]);
 const loading = ref(false);
 
-// List of dumps with their IDs and names (should match inventoryDump.vue)
-const dumps = [
-  { id: 1, name: 'Heartland' },
-  { id: 2, name: 'Wireline' },
-  { id: 3, name: 'Ada' },
-  { id: 4, name: 'Oga Remy' },
-  { id: 5, name: 'Pastor (Remy)' },
-  { id: 6, name: 'Ebuka' },
-  { id: 7, name: 'More Grace' },
-  { id: 8, name: 'Ndony' },
-  { id: 9, name: 'Papa' },
-  { id: 10, name: 'Nkechi' },
-  { id: 11, name: 'Rugged Pastor' },
-  { id: 12, name: 'Madam Iyawo' },
-  { id: 13, name: 'Azuke' },
-  { id: 14, name: 'Chigozie' },
-  { id: 15, name: 'Francis FM' },
-  { id: 16, name: 'Igwe' },
-  { id: 17, name: 'Victor Amadi' },
-  { id: 18, name: 'Madam Joy' },
-  { id: 19, name: 'CAC' }
-];
+// Get dumps from localStorage or default data (same as inventoryDump.vue)
+const getDumps = () => {
+  const savedDumps = localStorage.getItem('inventoryDumps');
+  if (savedDumps) {
+    return JSON.parse(savedDumps);
+  }
+  
+  // Default dumps - fallback if no localStorage data
+  return [
+    { id: 1, name: 'Heartland' },
+    { id: 2, name: 'Wireline' },
+    { id: 3, name: 'Ada' },
+    { id: 4, name: 'Oga Remy' },
+    { id: 5, name: 'Pastor (Remy)' },
+    { id: 6, name: 'Ebuka' },
+    { id: 7, name: 'More Grace' },
+    { id: 8, name: 'Ndony' },
+    { id: 9, name: 'Papa' },
+    { id: 10, name: 'Nkechi' },
+    { id: 11, name: 'Rugged Pastor' },
+    { id: 12, name: 'Madam Iyawo' },
+    { id: 13, name: 'Azuke' },
+    { id: 14, name: 'Chigozie' },
+    { id: 15, name: 'Francis FM' },
+    { id: 16, name: 'Igwe' },
+    { id: 17, name: 'Victor Amadi' },
+    { id: 18, name: 'Madam Joy' },
+    { id: 19, name: 'CAC' }
+  ];
+};
+
+const dumps = ref(getDumps());
 
 // Get dump name from route parameter
 const dumpName = computed(() => {
   const dumpId = parseInt(route.params.id);
-  const dump = dumps.find(d => d.id === dumpId);
+  const dump = dumps.value.find(d => d.id === dumpId);
   return dump ? dump.name : 'Unknown Dump';
 });
 
@@ -338,6 +296,55 @@ const goBack = () => {
   router.push('/dashboard/dump/inventoryDump');
 };
 
+// Export dump data to CSV
+const exportDumpData = () => {
+  try {
+    // Create CSV content with summary header
+    let csvContent = `${dumpName.value} Inventory Export Report\n`;
+    csvContent += `Generated on: ${new Date().toLocaleString()}\n`;
+    csvContent += `Total Records: ${dumpData.value.length}\n`;
+    csvContent += `Total Amount Supplied: ${formatLargeNumber(totalAmountSupplied.value)}\n`;
+    csvContent += `Total Amount Remaining: ${formatLargeNumber(totalAmountRemaining.value)}\n`;
+    csvContent += `Total Quantity Supplied: ${formatNumber(totalQuantitySupplied.value)}\n`;
+    csvContent += `Total Quantity Remaining: ${formatNumber(totalQuantityRemaining.value)}\n\n`;
+    
+    // Add inventory details header
+    csvContent += 'Date,Deposit,Rate,Quantity Deposited,Total Amount Supplied,Quantity Supplied,Amount Remaining,Quantity Remaining,Status\n';
+    
+    // Add inventory data
+    dumpData.value.forEach(item => {
+      csvContent += `"${item.date || ''}","${item.deposit || ''}","${item.rate || ''}",${item.quantity_deposited || 0},"${item.total_amount_supplied || ''}",${item.quantity_supplied || 0},"${item.amount_remaining || ''}",${item.quantity_remaining || 0},"${item.status || ''}"\n`;
+    });
+    
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${dumpName.value}_inventory_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    // Show success notification
+    ElNotification({
+      title: 'Export Successful',
+      message: `${dumpName.value} inventory data exported successfully!`,
+      type: 'success',
+      duration: 3000
+    });
+  } catch (error) {
+    console.error('Export error:', error);
+    ElNotification({
+      title: 'Export Failed',
+      message: 'Failed to export inventory data',
+      type: 'error',
+      duration: 3000
+    });
+  }
+};
+
 // Format currency values
 const formatCurrency = (value) => {
   if (!value) return '';
@@ -352,6 +359,33 @@ const formatCurrency = (value) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0
   }).format(parseFloat(numericValue));
+};
+
+// Format large numbers with K, M, B notation (3 significant figures)
+const formatLargeNumber = (value) => {
+  if (!value) return '₦0';
+  const numericValue = parseFloat(value.toString().replace(/[^\d.-]/g, ''));
+  if (!numericValue || isNaN(numericValue)) return '₦0';
+  
+  const absValue = Math.abs(numericValue);
+  const sign = numericValue < 0 ? '-' : '';
+  
+  if (absValue >= 1000000000) {
+    // Billions
+    const billions = absValue / 1000000000;
+    return `${sign}₦${billions.toPrecision(3)}B`;
+  } else if (absValue >= 1000000) {
+    // Millions
+    const millions = absValue / 1000000;
+    return `${sign}₦${millions.toPrecision(3)}M`;
+  } else if (absValue >= 1000) {
+    // Thousands
+    const thousands = absValue / 1000;
+    return `${sign}₦${thousands.toPrecision(3)}K`;
+  } else {
+    // Less than 1000, show full number with Naira symbol
+    return `${sign}₦${absValue.toFixed(0)}`;
+  }
 };
 
 // Format regular numbers with commas

@@ -12,6 +12,14 @@ const loading = ref(false);
 const hasGeneratedReport = ref(false);
 const showBatchModal = ref(false);
 
+// Capitalize first letter of each word
+const capitalizeName = (name) => {
+  if (!name) return '';
+  return name.split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+};
+
 // Batch configuration
 const batchConfig = ref({
   month: '',
@@ -350,7 +358,7 @@ async function handleGenerateReport() {
            <li class="font-medium">Date:<b> ${item.date || 'Not specified'}</b></li>
            <li class="font-medium my-2">Container No:<b> ${item.container_no || 'Not specified'}</b></li>
            <li class="font-medium">Driver:<b> ${item.driver || 'Not specified'}</b></li>
-           <li class="font-medium my-2">Dump:<b> ${item.dump || 'Not specified'}</b></li>
+           <li class="font-medium my-2">Dump:<b> ${capitalizeName(item.dump) || 'Not specified'}</b></li>
            <li class="font-medium">Containers Delivered:<b> ${item.containers_delivered}</b></li>
            <li class="font-medium my-2">Vessel Details:<b> ${item.vessel_details || 'Not specified'}</b></li>
            <li class="font-medium">Comments:<b> ${item.comments || 'None'}</b></li>
@@ -539,7 +547,7 @@ const months = [
                   </td>
                   <td class="px-2 py-2 border border-blue-200 text-center">
                     <input v-if="row.isEditing && canEdit(row)" v-model="row.dump" class="border rounded px-1 py-0.5 w-full text-sm" />
-                    <span v-else>{{ row.dump || '-' }}</span>
+                    <span v-else>{{ capitalizeName(row.dump) || '-' }}</span>
                   </td>
                   <td class="px-2 py-2 border border-blue-200 text-center">
                     <input v-if="row.isEditing && canEdit(row)" v-model="row.containers_delivered" type="number" min="0" class="border rounded px-1 py-0.5 w-full text-sm" />
