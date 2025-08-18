@@ -197,7 +197,37 @@ async function loadBatchData(batchId) {
       .order('serial_number');
 
     if (error) throw error;
-    currentBatchData.value = data.map(item => ({ ...item, isEditing: false }));
+    
+    // Always ensure exactly 10 rows are displayed
+    const batchData = [];
+    for (let i = 1; i <= 10; i++) {
+      const existingRow = data?.find(item => item.serial_number === i);
+      
+      if (existingRow) {
+        // Use existing row data
+        batchData.push({ ...existingRow, isEditing: false });
+      } else {
+        // Create empty row for missing serial numbers
+        batchData.push({
+          id: null, // No database ID yet
+          batch_id: batchId,
+          serial_number: i,
+          date: null,
+          container_no: '',
+          driver: '',
+          dump: '',
+          containers_delivered: 0,
+          vessel_details: '',
+          comments: '',
+          editable_until: null,
+          isEditing: false
+        });
+      }
+    }
+    
+    currentBatchData.value = batchData;
+    console.log(`Loaded batch data: ${data?.length || 0} existing rows, displaying 10 total rows`);
+    
   } catch (error) {
     ElMessage.error('Failed to load batch data: ' + error.message);
   } finally {
@@ -245,31 +275,63 @@ async function saveRow(row) {
     const now = new Date();
     const newEditableUntil = new Date(now.getTime() + EDIT_WINDOW_MINUTES * 60 * 1000);
     
-    const updates = {
-      date: row.date,
-      container_no: row.container_no,
-      driver: row.driver,
-      dump: row.dump,
+    // Ensure proper data types and handle null values
+    const rowData = {
+      batch_id: parseInt(row.batch_id),
+      serial_number: parseInt(row.serial_number),
+      date: row.date || null,
+      container_no: row.container_no || '',
+      driver: row.driver || '',
+      dump: row.dump || '',
       containers_delivered: parseInt(row.containers_delivered) || 0,
-      vessel_details: row.vessel_details,
-      comments: row.comments,
+      vessel_details: row.vessel_details || '',
+      comments: row.comments || '',
       editable_until: newEditableUntil.toISOString(),
       updated_at: new Date().toISOString()
     };
 
-    const { error } = await supabase
-      .from('tracking_batch_data')
-      .update(updates)
-      .eq('id', row.id);
+    console.log('Saving row data:', rowData); // Debug log
 
-    if (error) throw error;
+    let result;
+    if (row.id === null || row.id === undefined) {
+      // Insert new row
+      console.log('Inserting new row for serial_number:', row.serial_number);
+      result = await supabase
+        .from('tracking_batch_data')
+        .insert([rowData])
+        .select();
+      
+      if (result.error) throw result.error;
+      
+      // Update local row with database ID
+      const index = currentBatchData.value.findIndex(item => item.serial_number === row.serial_number);
+      if (index !== -1) {
+        currentBatchData.value[index].id = result.data[0].id;
+        currentBatchData.value[index].editable_until = newEditableUntil.toISOString();
+        console.log('Updated local row with new ID:', result.data[0].id);
+      }
+    } else {
+      // Update existing row
+      console.log('Updating existing row with ID:', row.id);
+      result = await supabase
+        .from('tracking_batch_data')
+        .update(rowData)
+        .eq('id', row.id);
+      
+      if (result.error) throw result.error;
+      
+      // Update local row
+      const index = currentBatchData.value.findIndex(item => item.id === row.id);
+      if (index !== -1) {
+        currentBatchData.value[index].editable_until = newEditableUntil.toISOString();
+      }
+    }
 
     ElMessage.success('Row saved successfully!');
-    const index = currentBatchData.value.findIndex(item => item.id === row.id);
-    if (index !== -1) {
-      currentBatchData.value[index].editable_until = newEditableUntil.toISOString();
-    }
+    
   } catch (error) {
+    console.error('Save row error:', error);
+    console.error('Row data that failed:', row);
     ElMessage.error('Failed to save row: ' + error.message);
     row.isEditing = true;
   } finally {
@@ -283,8 +345,8 @@ async function deleteRow(row) {
     if (window.confirm('Are you sure you want to clear this row?')) {
       loading.value = true;
       try {
-        const updates = {
-          date: null, // Changed from '' to null
+        const clearedData = {
+          date: null,
           container_no: '',
           driver: '',
           dump: '',
@@ -295,21 +357,33 @@ async function deleteRow(row) {
           updated_at: new Date().toISOString()
         };
 
-        const { error } = await supabase
-          .from('tracking_batch_data')
-          .update(updates)
-          .eq('id', row.id);
+        // Only update database if row has a valid ID
+        if (row.id !== null && row.id !== undefined) {
+          const { error } = await supabase
+            .from('tracking_batch_data')
+            .update(clearedData)
+            .eq('id', row.id);
 
-        if (error) throw error;
+          if (error) throw error;
+        }
+        // If row.id is null, it doesn't exist in database yet, so just clear local data
 
-        // Update local data
-        const index = currentBatchData.value.findIndex(item => item.id === row.id);
+        // Update local data using serial_number to find the row
+        const index = currentBatchData.value.findIndex(item => item.serial_number === row.serial_number);
         if (index !== -1) {
-          Object.assign(currentBatchData.value[index], updates);
+          // Keep the structure but clear the data
+          Object.assign(currentBatchData.value[index], {
+            ...clearedData,
+            id: row.id, // Keep existing ID (could be null)
+            batch_id: row.batch_id,
+            serial_number: row.serial_number,
+            isEditing: false
+          });
         }
 
         ElMessage.success('Row cleared successfully!');
       } catch (error) {
+        console.error('Delete row error:', error);
         ElMessage.error('Failed to clear row: ' + error.message);
       } finally {
         loading.value = false;
@@ -473,8 +547,8 @@ const months = [
           <div class="bg-white rounded-xl shadow-lg border border-gray-200 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Available Batches</h2>
             <div v-if="batches.filter(batch => batch.status === 'Active').length === 0" class="text-center py-8">
-              <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2 2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-4.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 009.586 13H7" />
+              <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-4.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 009.586 13H7" />
               </svg>
               <h3 class="mt-2 text-sm font-medium text-gray-900">No active batches</h3>
               <p class="mt-1 text-sm text-gray-500">Get started by creating a new batch.</p>
@@ -636,7 +710,7 @@ const months = [
         <!-- Loading Overlay -->
         <div v-if="loading" class="fixed inset-0 bg-white bg-opacity-50 flex items-center justify-center z-40">
           <div class="text-center">
-            <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>

@@ -16,25 +16,7 @@ const loading = ref(false);
 // Get consistent dump ID based on dump name (case-insensitive)
 const getDumpIdByName = (dumpName) => {
   const dumpMapping = {
-    'heartland': 1,
-    'wireline': 2,
-    'ada': 3,
-    'oga remy': 4,
-    'pastor (remy)': 5,
-    'ebuka': 6,
-    'more grace': 7,
-    'ndony': 8,
-    'papa': 9,
-    'nkechi': 10,
-    'rugged pastor': 11,
-    'madam iyawo': 12,
-    'azuke': 13,
-    'chigozie': 14,
-    'francis fm': 15,
-    'igwe': 16,
-    'victor amadi': 17,
-    'madam joy': 18,
-    'cac': 19
+    
   };
   
   // Normalize dump name to lowercase for consistent mapping
@@ -145,50 +127,7 @@ const initializeDumps = async () => {
 
 // Get default dump list
 const getDefaultDumps = () => {
-  return [
-    { id: 1, name: 'Heartland', status: 'Active', lastUpdated: '2024-12-24', itemCount: 0 },
-    { id: 2, name: 'Wireline', status: 'Active', lastUpdated: '2024-12-23', itemCount: 0 },
-    { id: 3, name: 'Ada', status: 'Active', lastUpdated: '2024-12-20', itemCount: 0 },
-    { id: 4, name: 'Oga Remy', status: 'Active', lastUpdated: '2024-12-22', itemCount: 0 },
-    { id: 5, name: 'Pastor (Remy)', status: 'Active', lastUpdated: '2024-12-21', itemCount: 0 },
-    { id: 6, name: 'Ebuka', status: 'Active', lastUpdated: '2024-12-24', itemCount: 0 },
-    { id: 7, name: 'More Grace', status: 'Active', lastUpdated: '2024-12-23', itemCount: 0 },
-    { id: 8, name: 'Ndony', status: 'Active', lastUpdated: '2024-12-19', itemCount: 0 },
-    { id: 9, name: 'Papa', status: 'Active', lastUpdated: '2024-12-24', itemCount: 0 },
-    { id: 10, name: 'Nkechi', status: 'Active', lastUpdated: '2024-12-22', itemCount: 0 },
-    { id: 11, name: 'Rugged Pastor', status: 'Active', lastUpdated: '2024-12-21', itemCount: 0 },
-    { id: 12, name: 'Madam Iyawo', status: 'Active', lastUpdated: '2024-12-24', itemCount: 0 },
-    { id: 13, name: 'Azuke', status: 'Active', lastUpdated: '2024-12-18', itemCount: 0 },
-    { id: 14, name: 'Chigozie', status: 'Active', lastUpdated: '2024-12-23', itemCount: 0 },
-    { id: 15, name: 'Francis FM', status: 'Active', lastUpdated: '2024-12-22', itemCount: 0 },
-    { id: 16, name: 'Igwe', status: 'Active', lastUpdated: '2024-12-24', itemCount: 0 },
-    { id: 17, name: 'Victor Amadi', status: 'Active', lastUpdated: '2024-12-21', itemCount: 0 },
-    { id: 18, name: 'Madam Joy', status: 'Active', lastUpdated: '2024-12-23', itemCount: 0 },
-    { id: 19, name: 'CAC', status: 'Active', lastUpdated: '2024-12-24', itemCount: 0 }
-  ];
-};
-
-// Create default dumps in database
-const createDefaultDumpsInDatabase = async (defaultDumps) => {
-  try {
-    const dumpEntries = defaultDumps.map(dump => ({
-      dump_name: dump.name,
-      status: dump.status,
-      item_count: dump.itemCount,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }));
-    
-    const { error } = await supabase
-      .from('inventory_dumps')
-      .insert(dumpEntries);
-    
-    if (error) {
-      console.error('Error creating default dumps:', error);
-    }
-  } catch (error) {
-    console.error('Failed to create default dumps:', error);
-  }
+  return [];
 };
 
 const dumps = ref([]);
@@ -274,41 +213,59 @@ const updateAllDumpCounts = async () => {
   }
 };
 
+// Add new dump with optimistic updates
 const addNewDump = async () => {
   if (newDumpName.value.trim()) {
     try {
       loading.value = true;
       
-      // Capitalize the dump name
-      const capitalizedName = normalizeDumpName(newDumpName.value.trim());
+      // Normalize the dump name
+      const normalizedName = normalizeDumpName(newDumpName.value.trim());
       
-      // Save directly to database - inventory table
-      const dumpEntry = {
-        dump_name: capitalizedName,
-        status: 'Active',
-        item_count: 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
+      // Check for duplicates (case-insensitive)
+      const existingDump = dumps.value.find(d => 
+        d.name.toLowerCase() === normalizedName.toLowerCase()
+      );
       
+      if (existingDump) {
+        ElNotification({
+          title: 'Duplicate Dump',
+          message: `Dump "${normalizedName}" already exists!`,
+          type: 'warning',
+        });
+        return;
+      }
+      
+      // Save to dumps table
       const { data, error } = await supabase
-        .from('inventory')
-        .insert(dumpEntry)
+        .from('dumps')
+        .insert([{
+          name: normalizedName,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }])
         .select()
         .single();
       
       if (error) throw error;
       
-      // Convert to component format and add to local state
+      // Calculate next sequential ID based on current local state
+      const nextId = Math.max(...dumps.value.map(d => d.id), 0) + 1;
+      
+      // Add to local state immediately (optimistic update)
       const newDump = {
-        id: getDumpIdByName(capitalizedName), // Use consistent ID mapping
-        name: data.dump_name,
-        status: data.status,
-        lastUpdated: data.updated_at.split('T')[0],
-        itemCount: data.item_count || 0
+        id: nextId, // Sequential ID for UI consistency
+        name: normalizedName,
+        status: 'Active',
+        lastUpdated: new Date().toISOString().split('T')[0],
+        itemCount: 0,
+        dbId: data.id // Store database ID for reference
       };
       
       dumps.value.push(newDump);
+      
+      // Force Vue reactivity
+      dumps.value = [...dumps.value];
       
       // Reset form and close modal
       newDumpName.value = '';
@@ -317,12 +274,11 @@ const addNewDump = async () => {
       // Show success message
       ElNotification({
         title: 'Success',
-        message: `Dump "${capitalizedName}" added successfully and synced across all devices!`,
+        message: `Dump "${normalizedName}" (ID: ${nextId}) added successfully!`,
         type: 'success',
       });
       
-      // Refresh the dump counts
-      await updateAllDumpCounts();
+      console.log(`Added new dump: ${normalizedName} with ID ${nextId} (DB ID: ${data.id})`);
       
     } catch (error) {
       console.error('Failed to add new dump:', error);

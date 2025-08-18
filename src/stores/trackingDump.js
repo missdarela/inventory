@@ -4,17 +4,7 @@ import { supabase } from '../supabase'
 
 export const useTrackingDumpStore = defineStore('trackingDump', () => {
   // State
-  const trackingDumps = ref([
-    { id: 1, name: 'Osazz', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
-    { id: 2, name: 'CAC', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
-    { id: 3, name: 'Igwe', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
-    { id: 4, name: 'More Grace', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
-    { id: 5, name: 'Ebuka', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
-    { id: 6, name: 'Papa', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
-    { id: 7, name: 'France', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
-    { id: 8, name: 'Victor', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] },
-    { id: 9, name: 'Iyawo', status: 'Active', itemCount: 0, lastUpdated: null, deliveries: [] }
-  ])
+  const trackingDumps = ref([])
 
   const deliveries = ref([])
   const loading = ref(false)

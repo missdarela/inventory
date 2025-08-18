@@ -16,22 +16,14 @@ const dumps = ref([]);
 // Get consistent dump ID based on dump name (case-insensitive)
 const getDumpIdByName = (dumpName) => {
   const dumpMapping = {
-    'osazz': 1,
-    'cac': 2,
-    'igwe': 3,
-    'more grace': 4,
-    'ebuka': 5,
-    'papa': 6,
-    'france': 7,
-    'victor': 8,
-    'iyawo': 9
+    // Removed predefined dump mapping
   };
   
   // Normalize dump name to lowercase for consistent mapping
   const normalizedName = dumpName.toLowerCase().trim();
   
   // Return predefined ID or generate new ID for custom dumps
-  return dumpMapping[normalizedName] || (Object.keys(dumpMapping).length + 1);
+  return Object.keys(dumpMapping).length + 1;
 };
 
 // Normalize dump name for consistent capitalization
@@ -50,121 +42,91 @@ const normalizeDumpName = (dumpName) => {
     .join(' ');
 };
 
-// Get default tracking dumps
-const getDefaultDumps = () => {
-  return [
-    { id: 1, name: 'Osazz' },
-    { id: 2, name: 'CAC' },
-    { id: 3, name: 'Igwe' },
-    { id: 4, name: 'More Grace' },
-    { id: 5, name: 'Ebuka' },
-    { id: 6, name: 'Papa' },
-    { id: 7, name: 'France' },
-    { id: 8, name: 'Victor' },
-    { id: 9, name: 'Iyawo' }
-  ];
-};
-
-// Initialize dumps from database instead of localStorage
+// Initialize dumps from database only - no predefined dumps
 const initializeDumps = async () => {
   try {
     loading.value = true;
     
-    // Start with all predefined dumps
-    const predefinedDumps = getDefaultDumps();
+    // Start with empty dump list - no predefined dumps
     const allDumps = new Map();
-    let nextCustomId = 10; // Start custom IDs from 10
+    let nextId = 1; // Start IDs from 1
     
-    // Add all predefined dumps first
-    predefinedDumps.forEach(dump => {
-      const lowerKey = dump.name.toLowerCase();
-      allDumps.set(lowerKey, {
-        id: dump.id,
-        name: dump.name,
-        status: 'Active',
-        lastUpdated: new Date().toISOString().split('T')[0],
-        itemCount: 0,
-        containerCount: 0
-      });
-    });
-    
-    // Load custom dumps from tracking_dumps table (similar to inventoryDump)
+    // Load all dumps from tracking_dumps table only - optimized query
     try {
       const { data: customDumps, error: dumpsError } = await supabase
         .from('tracking_dumps')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('id, name, created_at, updated_at')
+        .order('id', { ascending: true });
       
       if (dumpsError) {
-        console.warn('Error loading custom dumps from tracking_dumps:', dumpsError);
+        console.error('Error loading tracking dumps:', dumpsError);
       } else if (customDumps && customDumps.length > 0) {
+        console.log(`Loading ${customDumps.length} dumps from tracking_dumps table`);
+        
         customDumps.forEach((dump) => {
           const normalizedName = normalizeDumpName(dump.name);
           const lowerKey = normalizedName.toLowerCase();
           
-          // If this is a custom dump (not in predefined list), add it
-          if (!allDumps.has(lowerKey)) {
-            allDumps.set(lowerKey, {
-              id: nextCustomId++, // Assign unique incremental ID
-              name: normalizedName,
-              status: dump.status || 'Active',
-              lastUpdated: dump.last_updated || dump.updated_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-              itemCount: 0,
-              containerCount: 0
-            });
-          } else {
-            // Update existing predefined dump with database info
-            const existingDump = allDumps.get(lowerKey);
-            existingDump.lastUpdated = dump.last_updated || dump.updated_at?.split('T')[0] || existingDump.lastUpdated;
-            existingDump.status = dump.status || existingDump.status;
-          }
+          allDumps.set(lowerKey, {
+            id: nextId++, // Sequential ID assignment
+            name: normalizedName,
+            status: 'Active',
+            lastUpdated: dump.updated_at?.split('T')[0] || dump.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+            itemCount: 0,
+            containerCount: 0,
+            dbId: dump.id // Store database ID for reference
+          });
         });
       }
     } catch (dbError) {
-      console.warn('Failed to load custom dumps from tracking_dumps table:', dbError);
+      console.warn('Database query failed for tracking_dumps, starting with empty list:', dbError);
     }
     
-    // Also check tracking_batch_data for any dump names that might not be in tracking_dumps yet
-    try {
-      const { data, error } = await supabase
-        .from('tracking_batch_data')
-        .select('dump, date')
-        .not('dump', 'is', null)
-        .not('dump', 'eq', '')
-        .order('date', { ascending: false });
-      
-      if (error) {
-        console.warn('Error loading tracking dumps from tracking_batch_data:', error);
-      } else if (data && data.length > 0) {
-        // Check for any dump names in tracking_batch_data that aren't already tracked
-        data.forEach((item) => {
-          const rawDumpName = item.dump;
-          if (rawDumpName && rawDumpName.trim()) {
-            const normalizedName = normalizeDumpName(rawDumpName);
+    // Only check tracking_batch_data if we have no dumps from tracking_dumps
+    if (allDumps.size === 0) {
+      try {
+        console.log('No dumps in tracking_dumps table, checking tracking_batch_data...');
+        
+        const { data: trackingData, error: trackingError } = await supabase
+          .from('tracking_batch_data')
+          .select('dump')
+          .not('dump', 'is', null)
+          .order('created_at', { ascending: true });
+        
+        if (!trackingError && trackingData && trackingData.length > 0) {
+          console.log(`Found ${trackingData.length} tracking records`);
+          
+          // Get unique dump names in order they were created
+          const uniqueDumps = [];
+          const seen = new Set();
+          
+          trackingData.forEach(item => {
+            if (item.dump && !seen.has(item.dump.toLowerCase())) {
+              seen.add(item.dump.toLowerCase());
+              uniqueDumps.push(item.dump);
+            }
+          });
+          
+          console.log(`Found ${uniqueDumps.length} unique dumps in tracking data`);
+          
+          uniqueDumps.forEach(dumpName => {
+            const normalizedName = normalizeDumpName(dumpName);
             const lowerKey = normalizedName.toLowerCase();
             
-            // If this dump name exists in tracking_batch_data but not in our list, add it
-            if (!allDumps.has(lowerKey)) {
-              allDumps.set(lowerKey, {
-                id: nextCustomId++,
-                name: normalizedName,
-                status: 'Active',
-                lastUpdated: item.date || new Date().toISOString().split('T')[0],
-                itemCount: 0,
-                containerCount: 0
-              });
-            } else {
-              // Update existing dump with latest info from tracking data
-              const existingDump = allDumps.get(lowerKey);
-              if (item.date && (!existingDump.lastUpdated || item.date > existingDump.lastUpdated)) {
-                existingDump.lastUpdated = item.date;
-              }
-            }
-          }
-        });
+            allDumps.set(lowerKey, {
+              id: nextId++,
+              name: normalizedName,
+              status: 'Active',
+              lastUpdated: new Date().toISOString().split('T')[0],
+              itemCount: 0,
+              containerCount: 0,
+              dbId: null
+            });
+          });
+        }
+      } catch (dbError) {
+        console.warn('Database query failed for tracking_batch_data:', dbError);
       }
-    } catch (dbError) {
-      console.warn('Database query failed for tracking_batch_data, using existing dumps:', dbError);
     }
     
     const dumpsArray = Array.from(allDumps.values());
@@ -172,14 +134,14 @@ const initializeDumps = async () => {
     // Sort by ID to maintain consistent order
     dumpsArray.sort((a, b) => a.id - b.id);
     
-    console.log(`Loaded ${dumpsArray.length} tracking dumps (${predefinedDumps.length} predefined + ${dumpsArray.length - predefinedDumps.length} custom):`, 
+    console.log(`Loaded ${dumpsArray.length} tracking dumps from database:`, 
       dumpsArray.map(d => `${d.name} (ID: ${d.id})`));
     
     return dumpsArray;
     
   } catch (error) {
     console.error('Failed to initialize tracking dumps:', error);
-    return getDefaultDumps();
+    return []; // Return empty array instead of predefined dumps
   } finally {
     loading.value = false;
   }
@@ -194,6 +156,8 @@ const loadDumps = async () => {
 // Update all dump counts from database
 const updateAllDumpCounts = async () => {
   try {
+    console.log('Starting updateAllDumpCounts...');
+    
     // Fetch all tracking data in one query
     const { data: allTrackingData, error } = await supabase
       .from('tracking_batch_data')
@@ -204,6 +168,8 @@ const updateAllDumpCounts = async () => {
       console.error('Error fetching tracking data:', error);
       return;
     }
+    
+    console.log(`Fetched ${allTrackingData?.length || 0} tracking records from database`);
     
     // Count deliveries by dump name (case-insensitive)
     const dumpCounts = {};
@@ -225,9 +191,13 @@ const updateAllDumpCounts = async () => {
       }
     });
     
+    console.log('Calculated dump counts from database:', dumpCounts);
+    
     // Update dump counts
     dumps.value.forEach(dump => {
       const lowerKey = dump.name.toLowerCase();
+      const oldCount = dump.itemCount;
+      
       if (dumpCounts[lowerKey]) {
         dump.itemCount = dumpCounts[lowerKey].count;
         dump.containerCount = dumpCounts[lowerKey].containers;
@@ -235,7 +205,17 @@ const updateAllDumpCounts = async () => {
         dump.itemCount = 0;
         dump.containerCount = 0;
       }
+      
+      if (oldCount !== dump.itemCount) {
+        console.log(`Updated "${dump.name}" count: ${oldCount} → ${dump.itemCount}`);
+      }
     });
+    
+    console.log('Final dump counts after update:', dumps.value.map(d => ({
+      name: d.name,
+      itemCount: d.itemCount,
+      containerCount: d.containerCount
+    })));
     
   } catch (error) {
     console.error('Error updating dump counts:', error);
@@ -257,6 +237,7 @@ const navigateToDumpDetails = (dumpId) => {
   router.push(`/dashboard/dump/trackingDump/${dumpId}`);
 };
 
+// Add new dump function
 const addNewDump = async () => {
   if (!newDumpName.value.trim()) {
     ElNotification({
@@ -266,7 +247,7 @@ const addNewDump = async () => {
     });
     return;
   }
-
+  
   try {
     loading.value = true;
     
@@ -280,19 +261,15 @@ const addNewDump = async () => {
     if (existingDump) {
       ElNotification({
         title: 'Error',
-        message: 'A dump with this name already exists',
+        message: `Dump "${normalizedName}" already exists`,
         type: 'error'
       });
       return;
     }
     
-    // Save to tracking_dumps table for persistence (similar to inventoryDump)
+    // Save to tracking_dumps table for cross-device persistence
     const dumpEntry = {
-      name: normalizedName,
-      status: 'Active',
-      last_updated: new Date().toISOString().split('T')[0],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      name: normalizedName
     };
     
     const { data, error } = await supabase
@@ -303,14 +280,18 @@ const addNewDump = async () => {
     
     if (error) throw error;
     
-    // Add to local dumps array
+    // Calculate the next sequential ID immediately
+    const nextId = Math.max(...dumps.value.map(d => d.id), 0) + 1;
+    
+    // Add to local dumps array with immediate ID assignment
     const newDump = {
-      id: getDumpIdByName(normalizedName),
+      id: nextId, // Use calculated sequential ID
       name: data.name,
-      status: data.status,
-      lastUpdated: data.last_updated,
+      status: 'Active',
+      lastUpdated: data.last_updated || data.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
       itemCount: 0,
-      containerCount: 0
+      containerCount: 0,
+      dbId: data.id // Store database ID separately
     };
     
     dumps.value.push(newDump);
@@ -318,14 +299,22 @@ const addNewDump = async () => {
     // Sort dumps by ID to maintain order
     dumps.value.sort((a, b) => a.id - b.id);
     
+    // Force Vue reactivity update
+    dumps.value = [...dumps.value];
+    
     newDumpName.value = '';
     showAddModal.value = false;
     
+    console.log(`Added new dump: ${normalizedName} with ID ${nextId}`);
+    
     ElNotification({
       title: 'Success',
-      message: `Dump "${normalizedName}" added successfully and synced across all devices!`,
+      message: `Dump "${normalizedName}" added successfully with ID ${nextId}!`,
       type: 'success'
     });
+    
+    // Skip full refresh since we already updated local state optimistically
+    // await refreshDumpData();
     
   } catch (error) {
     console.error('Error adding dump:', error);
@@ -359,42 +348,64 @@ const deleteDump = async (dumpId, dumpName, event) => {
   try {
     loading.value = true;
     
-    // Delete all tracking data for this dump from database
-    const { error: trackingError } = await supabase
+    console.log(`Starting deletion process for dump: "${dumpName}" (ID: ${dumpId})`);
+    
+    // First, check how many records exist for this dump
+    const { data: existingData, error: checkError } = await supabase
+      .from('tracking_batch_data')
+      .select('id, dump')
+      .ilike('dump', dumpName);
+    
+    if (checkError) {
+      console.error('Error checking existing data:', checkError);
+    } else {
+      console.log(`Found ${existingData?.length || 0} existing records for dump "${dumpName}":`, existingData);
+    }
+    
+    // Delete all tracking data for this dump from database (case-insensitive)
+    const { data: deletedData, error: trackingError } = await supabase
       .from('tracking_batch_data')
       .delete()
-      .eq('dump', dumpName);
+      .ilike('dump', dumpName)
+      .select(); // Return deleted records
     
     if (trackingError) {
       console.error('Error deleting tracking data:', trackingError);
       ElNotification({
         title: 'Error',
-        message: 'Failed to delete tracking data for this dump',
+        message: 'Failed to delete tracking data for this dump: ' + trackingError.message,
         type: 'error'
       });
       return;
     }
     
-    // For predefined dumps, don't remove from local state - they should remain available
-    // For custom dumps, remove from local state
+    console.log(`Successfully deleted ${deletedData?.length || 0} tracking records for dump "${dumpName}"`);
+    
+    // Delete from tracking_dumps table
+    const { error: dumpTableError } = await supabase
+      .from('tracking_dumps')
+      .delete()
+      .ilike('name', dumpName);
+    
+    if (dumpTableError) {
+      console.error('Error deleting from tracking_dumps table:', dumpTableError);
+      ElNotification({
+        title: 'Error',
+        message: 'Failed to delete dump from database: ' + dumpTableError.message,
+        type: 'error'
+      });
+      return;
+    }
+    
+    // Remove from local state
     const dumpIndex = dumps.value.findIndex(dump => dump.id === dumpId);
     if (dumpIndex > -1) {
-      const dump = dumps.value[dumpIndex];
-      // Only remove custom dumps (ID >= 10) from the list
-      if (dump.id >= 10) {
-        dumps.value.splice(dumpIndex, 1);
-      } else {
-        // For predefined dumps, just reset their data
-        dump.itemCount = 0;
-        dump.containerCount = 0;
-        dump.lastUpdated = new Date().toISOString().split('T')[0];
-        dump.status = 'Active';
-      }
+      dumps.value.splice(dumpIndex, 1);
     }
     
     ElNotification({
       title: 'Success',
-      message: `Tracking dump "${dumpName}" and all associated data deleted successfully and synced across all devices!`,
+      message: `Dump "${dumpName}" deleted successfully! (${deletedData?.length || 0} records deleted)`,
       type: 'success'
     });
     
@@ -412,6 +423,62 @@ const deleteDump = async (dumpId, dumpName, event) => {
     loading.value = false;
   }
 };
+
+// Clear all dumps and start fresh
+// const clearAllDumps = async () => {
+//   try {
+//     const confirmed = window.confirm('Are you sure you want to clear ALL tracking dumps and start fresh?\n\nThis will:\n- Delete all tracking dumps from database\n- Delete all tracking data\n- Reset to empty state\n\nThis action cannot be undone.');
+    
+//     if (!confirmed) return;
+    
+//     loading.value = true;
+    
+//     console.log('Clearing all tracking dumps and data...');
+    
+//     // Delete all tracking data
+//     const { error: trackingDataError } = await supabase
+//       .from('tracking_batch_data')
+//       .delete()
+//       .neq('id', 0); // Delete all records
+    
+//     if (trackingDataError) {
+//       console.error('Error deleting tracking data:', trackingDataError);
+//     } else {
+//       console.log('Deleted all tracking data');
+//     }
+    
+//     // Delete all custom dumps
+//     const { error: dumpsError } = await supabase
+//       .from('tracking_dumps')
+//       .delete()
+//       .neq('id', 0); // Delete all records
+    
+//     if (dumpsError) {
+//       console.error('Error deleting tracking dumps:', dumpsError);
+//     } else {
+//       console.log('Deleted all tracking dumps');
+//     }
+    
+//     // Clear local state
+//     dumps.value = [];
+    
+//     ElNotification({
+//       title: 'Success',
+//       message: 'All tracking dumps cleared successfully! You can now add your own dumps.',
+//       type: 'success'
+//     });
+    
+//   } catch (error) {
+//     console.error('Error clearing dumps:', error);
+//     ElNotification({
+//       title: 'Error',
+//       message: 'Failed to clear dumps: ' + error.message,
+//       type: 'error'
+//     });
+//   } finally {
+//     loading.value = false;
+//   }
+// };
 
 // Refresh dump data
 const refreshDumpData = async () => {
@@ -436,15 +503,6 @@ onMounted(async () => {
     });
   }
 });
-
-const exportTrackingData = () => {
-  // Export functionality can be implemented later
-  ElNotification({
-    title: 'Info',
-    message: 'Export functionality coming soon',
-    type: 'info'
-  });
-};
 
 const totalDeliveries = computed(() => {
   const dumps = trackingDumpStore.trackingDumps;
@@ -478,24 +536,17 @@ const totalDeliveries = computed(() => {
             <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Tracking Dumps</h1>
             <p class="mt-2 text-sm text-gray-600">Manage and view your tracking dump locations</p>
           </div>
-          <button 
-            @click="exportTrackingData"
-            class="inline-flex items-center justify-center px-6 py-3 text-sm font-medium text-white bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
-          >
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-            </svg>
-            Export to CSV
-          </button>
-          <button 
-            @click="refreshDumpData"
-            class="inline-flex items-center justify-center px-6 py-3 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
-          >
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Refresh
-          </button>
+          <div class="flex items-center justify-end gap-4">
+            <button 
+              @click="showAddModal = true"
+              class="inline-flex items-center justify-center px-6 py-3 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
+            >
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+              </svg>
+              Add New Dump
+            </button>
+          </div>
         </div>
       </div>
 
@@ -540,20 +591,9 @@ const totalDeliveries = computed(() => {
 
         <div class="bg-white overflow-hidden shadow-lg rounded-lg border border-gray-200">
           <div class="p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <div class="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center">
-                  <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                  </svg>
-                </div>
-              </div>
-              <div class="ml-5 w-0 flex-1">
-                <dl>
-                  <dt class="text-sm font-medium text-gray-500 truncate">Active Dumps</dt>
-                  <dd class="text-2xl font-bold text-gray-900">{{ dumps?.filter(d => d.status === 'Active').length || 0 }}</dd>
-                </dl>
-              </div>
+            <div class="flex items-center justify-between text-sm">
+              <span class="text-gray-500">Active Dumps</span>
+              <span class="font-bold text-gray-900 text-2xl">{{ dumps?.filter(d => d.status === 'Active').length || 0 }}</span>
             </div>
           </div>
         </div>
@@ -562,8 +602,8 @@ const totalDeliveries = computed(() => {
           <div class="p-6">
             <div class="flex items-center justify-between">
               <div class="flex items-center space-x-3">
-                <div class="w-8 h-8 bg-yellow-500 rounded-lg flex items-center justify-center">
-                  <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="w-12 h-12 bg-yellow-500 rounded-lg flex items-center justify-center">
+                  <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4"></path>
                   </svg>
                 </div>
@@ -617,21 +657,13 @@ const totalDeliveries = computed(() => {
               </div>
               
               <div class="flex items-center">
-                <span 
-                  :class="{
-                    'bg-green-100 text-green-800': dump.status === 'Active',
-                    'bg-red-100 text-red-800': dump.status === 'Inactive'
-                  }"
-                  class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
-                >
-                  {{ dump.status }}
-                </span>
                 <button 
                   @click="deleteDump(dump.id, dump.name, $event)"
                   class="ml-2 text-red-500 hover:text-red-700 transition-colors duration-200"
+                  title="Delete dump"
                 >
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-7 7-7-7"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                   </svg>
                 </button>
               </div>
@@ -664,7 +696,7 @@ const totalDeliveries = computed(() => {
       <!-- Empty State -->
       <div v-if="filteredDumps.length === 0" class="text-center py-12">
         <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 12h.01M15 12h.01M21 12c0 4.418-4.03 8-9 8a9.06 9.06 0 01-8.925 0 5.5 5.5 0 00-1.5 2.12c0 2.969 2.235 5.356 5.137 5.356A5.5 5.5 0 0012 21a5.5 5.5 0 005.5-5.5c0-1.86.236-3.626.659-5.252a15.758 15.758 0 008.917 0 5.5 5.5 0 00-1.5 2.12 5.5 5.5 0 00-1.5-2.12z"></path>
         </svg>
         <h3 class="mt-2 text-sm font-medium text-gray-900">No dumps found</h3>
         <p class="mt-1 text-sm text-gray-500">{{ searchQuery ? 'Try adjusting your search terms.' : 'Get started by creating a new dump.' }}</p>

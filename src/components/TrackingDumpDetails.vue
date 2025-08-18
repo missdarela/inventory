@@ -18,7 +18,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
             <div class="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-green-500 to-blue-500 rounded-xl flex items-center justify-center flex-shrink-0">
               <svg class="w-6 h-6 sm:w-8 sm:h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2 2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-4.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 009.586 13H7" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-4.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 009.586 13H7" />
               </svg>
             </div>
             <div class="flex-1 min-w-0">
@@ -225,26 +225,110 @@ const router = useRouter();
 
 const deliveries = ref([]);
 const loading = ref(false);
+const actualDumpName = ref('');
 
-// Get dump name from route params - similar to DumpDetails
+// Get dump name from route params and database
 const dumpName = computed(() => {
+  return actualDumpName.value || 'Loading...';
+});
+
+// Load actual dump name from database
+const loadDumpName = async () => {
   const dumpId = parseInt(route.params.id);
   
-  // Predefined dump mapping (same as trackingDump.vue)
-  const dumpMapping = {
-    1: 'Osazz',
-    2: 'CAC', 
-    3: 'Igwe',
-    4: 'More Grace',
-    5: 'Ebuka',
-    6: 'Papa',
-    7: 'France',
-    8: 'Victor',
-    9: 'Iyawo'
-  };
+  console.log(`Loading dump name for ID: ${dumpId}`);
   
-  return dumpMapping[dumpId] || `Custom Dump ${dumpId}`;
-});
+  try {
+    // Load dumps in the same order as trackingDump component
+    const allDumps = new Map();
+    let nextId = 1;
+    
+    // First, load from tracking_dumps table (same as trackingDump.vue)
+    const { data: customDumps, error: dumpsError } = await supabase
+      .from('tracking_dumps')
+      .select('*')
+      .order('id', { ascending: true });
+    
+    if (!dumpsError && customDumps && customDumps.length > 0) {
+      console.log(`Loading ${customDumps.length} dumps from tracking_dumps table`);
+      
+      customDumps.forEach((dump) => {
+        const normalizedName = normalizeDumpName(dump.name);
+        const lowerKey = normalizedName.toLowerCase();
+        
+        allDumps.set(lowerKey, {
+          id: nextId++,
+          name: normalizedName,
+          dbId: dump.id
+        });
+      });
+    }
+    
+    // Then, load from tracking_batch_data for any missing dumps (same as trackingDump.vue)
+    const { data: trackingData, error: trackingError } = await supabase
+      .from('tracking_batch_data')
+      .select('dump, date')
+      .not('dump', 'is', null)
+      .order('date', { ascending: false });
+    
+    if (!trackingError && trackingData) {
+      console.log(`Found ${trackingData.length} tracking records`);
+      
+      trackingData.forEach(item => {
+        if (item.dump) {
+          const normalizedName = normalizeDumpName(item.dump);
+          const lowerKey = normalizedName.toLowerCase();
+          
+          if (!allDumps.has(lowerKey)) {
+            console.log(`Found dump "${normalizedName}" in tracking data but not in tracking_dumps table`);
+            allDumps.set(lowerKey, {
+              id: nextId++,
+              name: normalizedName,
+              dbId: null
+            });
+          }
+        }
+      });
+    }
+    
+    // Convert to array and sort by ID (same as trackingDump.vue)
+    const dumpsArray = Array.from(allDumps.values());
+    dumpsArray.sort((a, b) => a.id - b.id);
+    
+    console.log('Loaded dumps with IDs:', dumpsArray.map(d => `${d.name} (ID: ${d.id})`));
+    
+    // Find the dump with the matching display ID
+    const targetDump = dumpsArray.find(dump => dump.id === dumpId);
+    
+    if (targetDump) {
+      actualDumpName.value = targetDump.name;
+      console.log(`Found dump name for ID ${dumpId}: ${targetDump.name}`);
+    } else {
+      console.log(`No dump found with display ID ${dumpId}`);
+      actualDumpName.value = `Dump ${dumpId}`;
+    }
+    
+  } catch (error) {
+    console.error('Failed to load dump name:', error);
+    actualDumpName.value = `Dump ${dumpId}`;
+  }
+};
+
+// Normalize dump name for consistent capitalization (same as trackingDump.vue)
+const normalizeDumpName = (dumpName) => {
+  if (!dumpName) return '';
+  
+  // Convert to proper case (first letter of each word capitalized)
+  return dumpName
+    .toLowerCase()
+    .split(' ')
+    .map(word => {
+      // Handle special cases
+      if (word === 'cac') return 'CAC';
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+};
 
 const dumpStats = computed(() => {
   const totalDeliveries = deliveries.value.length;
@@ -270,7 +354,7 @@ const dumpStats = computed(() => {
 
 // Fetch dump data directly from tracking_batch_data table - similar to DumpDetails
 const fetchDumpData = async () => {
-  if (!dumpName.value || dumpName.value === 'Unknown Dump') return;
+  if (!dumpName.value || dumpName.value === 'Loading...') return;
   
   try {
     loading.value = true;
@@ -362,7 +446,8 @@ const formatNumber = (value) => {
   return new Intl.NumberFormat('en-US').format(value);
 };
 
-onMounted(() => {
+onMounted(async () => {
+  await loadDumpName();
   fetchDumpData();
 });
 </script>
