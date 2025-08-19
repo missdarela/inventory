@@ -46,65 +46,89 @@ const normalizeDumpName = (dumpName) => {
     .join(' ');
 };
 
-// Initialize dumps from database instead of localStorage
+// Initialize dumps from database only - no predefined dumps
 const initializeDumps = async () => {
   try {
     loading.value = true;
     
-    // Start with all predefined dumps
-    const predefinedDumps = getDefaultDumps();
+    // Start with empty dump list - no predefined dumps
     const allDumps = new Map();
-    let nextCustomId = 20; // Start custom IDs from 20
+    let nextId = 1; // Start IDs from 1
     
-    // Add all predefined dumps first
-    predefinedDumps.forEach(dump => {
-      const lowerKey = dump.name.toLowerCase();
-      allDumps.set(lowerKey, {
-        id: dump.id,
-        name: dump.name,
-        status: 'Active',
-        lastUpdated: new Date().toISOString().split('T')[0],
-        itemCount: 0
-      });
-    });
-    
-    // Load existing dump names from inventory table to check for custom dumps
-    const { data, error } = await supabase
-      .from('inventory')
-      .select('dump_name, status, updated_at, created_at')
-      .order('created_at', { ascending: false });
-    
-    if (error) {
-      console.warn('Error loading dumps from database:', error);
-      // Return predefined dumps if database fails
-      return predefinedDumps;
-    }
-    
-    if (data && data.length > 0) {
-      // Check for custom dumps not in predefined list
-      data.forEach((item) => {
-        const rawDumpName = item.dump_name;
-        if (rawDumpName) {
-          const normalizedName = normalizeDumpName(rawDumpName);
+    // Load all dumps from dumps table only - optimized query
+    try {
+      const { data: customDumps, error: dumpsError } = await supabase
+        .from('dumps')
+        .select('id, dump_name, created_at, updated_at')
+        .order('id', { ascending: true });
+      
+      if (dumpsError) {
+        console.error('Error loading dumps:', dumpsError);
+      } else if (customDumps && customDumps.length > 0) {
+        console.log(`Loading ${customDumps.length} dumps from dumps table`);
+        
+        customDumps.forEach((dump) => {
+          const normalizedName = normalizeDumpName(dump.dump_name);
           const lowerKey = normalizedName.toLowerCase();
           
-          // If this is a custom dump (not in predefined list), add it
-          if (!allDumps.has(lowerKey)) {
+          allDumps.set(lowerKey, {
+            id: nextId++, // Sequential ID assignment
+            name: normalizedName,
+            status: 'Active',
+            lastUpdated: dump.updated_at?.split('T')[0] || dump.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+            itemCount: 0,
+            dbId: dump.id // Store database ID for reference
+          });
+        });
+      }
+    } catch (dbError) {
+      console.warn('Database query failed for dumps, starting with empty list:', dbError);
+    }
+    
+    // Only check dump_inventory if we have no dumps from dumps table
+    if (allDumps.size === 0) {
+      try {
+        console.log('No dumps in dumps table, checking dump_inventory...');
+        
+        const { data: inventoryData, error: inventoryError } = await supabase
+          .from('dump_inventory')
+          .select('dump_name')
+          .not('dump_name', 'is', null)
+          .order('created_at', { ascending: true });
+        
+        if (!inventoryError && inventoryData && inventoryData.length > 0) {
+          console.log(`Found ${inventoryData.length} inventory records`);
+          
+          // Get unique dump names in order they were created
+          const uniqueDumps = [];
+          const seen = new Set();
+          
+          inventoryData.forEach(item => {
+            if (item.dump_name && !seen.has(item.dump_name.toLowerCase())) {
+              seen.add(item.dump_name.toLowerCase());
+              uniqueDumps.push(item.dump_name);
+            }
+          });
+          
+          console.log(`Found ${uniqueDumps.length} unique dumps in inventory data`);
+          
+          uniqueDumps.forEach(dumpName => {
+            const normalizedName = normalizeDumpName(dumpName);
+            const lowerKey = normalizedName.toLowerCase();
+            
             allDumps.set(lowerKey, {
-              id: nextCustomId++, // Assign unique incremental ID
+              id: nextId++,
               name: normalizedName,
-              status: item.status || 'Active',
-              lastUpdated: item.updated_at ? item.updated_at.split('T')[0] : item.created_at.split('T')[0],
-              itemCount: 0
+              status: 'Active',
+              lastUpdated: new Date().toISOString().split('T')[0],
+              itemCount: 0,
+              dbId: null
             });
-          } else {
-            // Update existing predefined dump with latest info
-            const existingDump = allDumps.get(lowerKey);
-            existingDump.status = item.status || existingDump.status;
-            existingDump.lastUpdated = item.updated_at ? item.updated_at.split('T')[0] : item.created_at.split('T')[0];
-          }
+          });
         }
-      });
+      } catch (dbError) {
+        console.warn('Database query failed for dump_inventory:', dbError);
+      }
     }
     
     const dumpsArray = Array.from(allDumps.values());
@@ -112,14 +136,14 @@ const initializeDumps = async () => {
     // Sort by ID to maintain consistent order
     dumpsArray.sort((a, b) => a.id - b.id);
     
-    console.log(`Loaded ${dumpsArray.length} dumps (${predefinedDumps.length} predefined + ${dumpsArray.length - predefinedDumps.length} custom):`, 
+    console.log(`Loaded ${dumpsArray.length} inventory dumps from database:`, 
       dumpsArray.map(d => `${d.name} (ID: ${d.id})`));
     
     return dumpsArray;
     
   } catch (error) {
-    console.error('Failed to initialize dumps:', error);
-    return getDefaultDumps();
+    console.error('Failed to initialize inventory dumps:', error);
+    return []; // Return empty array instead of predefined dumps
   } finally {
     loading.value = false;
   }
@@ -240,7 +264,7 @@ const addNewDump = async () => {
       const { data, error } = await supabase
         .from('dumps')
         .insert([{
-          name: normalizedName,
+          dump_name: normalizedName,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }])
@@ -302,7 +326,7 @@ const refreshDumpData = async () => {
   await updateAllDumpCounts();
 };
 
-// Delete dump function
+// Delete dump function - optimized for speed
 const deleteDump = async (dumpId, dumpName, event) => {
   // Prevent card click event when delete button is clicked
   event.stopPropagation();
@@ -317,52 +341,70 @@ const deleteDump = async (dumpId, dumpName, event) => {
   try {
     loading.value = true;
     
-    // Delete all inventory data for this dump from database
-    const { error: inventoryError } = await supabase
-      .from('inventory')
-      .delete()
-      .eq('dump_name', dumpName);
+    console.log(`Deleting dump: "${dumpName}" (ID: ${dumpId})`);
     
-    if (inventoryError) {
-      console.error('Error deleting inventory data:', inventoryError);
+    // Optimized: Delete operations in parallel for better performance
+    const [inventoryResult, dumpResult] = await Promise.allSettled([
+      // Delete all inventory data for this dump (case-insensitive)
+      supabase
+        .from('dump_inventory')
+        .delete()
+        .ilike('dump_name', dumpName)
+        .select('id'), // Only select id for count
+      
+      // Delete from dumps table
+      supabase
+        .from('dumps')
+        .delete()
+        .ilike('dump_name', dumpName)
+    ]);
+    
+    // Check for errors
+    if (inventoryResult.status === 'rejected') {
+      console.error('Error deleting inventory data:', inventoryResult.reason);
       ElNotification({
         title: 'Error',
-        message: 'Failed to delete inventory data for this dump',
+        message: 'Failed to delete inventory data: ' + inventoryResult.reason.message,
         type: 'error'
       });
       return;
     }
     
-    // For predefined dumps, don't remove from local state - they should remain available
-    // For custom dumps, remove from local state
-    const dumpIndex = dumps.value.findIndex(dump => dump.id === dumpId);
-    if (dumpIndex > -1) {
-      const dump = dumps.value[dumpIndex];
-      // Only remove custom dumps (ID >= 20) from the list
-      if (dump.id >= 20) {
-        dumps.value.splice(dumpIndex, 1);
-      } else {
-        // For predefined dumps, just reset their data
-        dump.itemCount = 0;
-        dump.lastUpdated = new Date().toISOString().split('T')[0];
-        dump.status = 'Active';
-      }
+    if (dumpResult.status === 'rejected') {
+      console.error('Error deleting from dumps table:', dumpResult.reason);
+      ElNotification({
+        title: 'Error',
+        message: 'Failed to delete dump: ' + dumpResult.reason.message,
+        type: 'error'
+      });
+      return;
     }
     
+    // Get count of deleted records
+    const deletedCount = inventoryResult.value?.data?.length || 0;
+    console.log(`Successfully deleted ${deletedCount} inventory records for dump "${dumpName}"`);
+    
+    // Optimized: Remove from local state immediately (optimistic update)
+    const dumpIndex = dumps.value.findIndex(dump => dump.id === dumpId);
+    if (dumpIndex > -1) {
+      dumps.value.splice(dumpIndex, 1);
+    }
+    
+    // Show success notification
     ElNotification({
       title: 'Success',
-      message: `Dump "${dumpName}" and all associated data deleted successfully and synced across all devices!`,
+      message: `Dump "${dumpName}" deleted successfully! (${deletedCount} records deleted)`,
       type: 'success'
     });
     
-    // Refresh data to update counts and sync across devices
-    await refreshDumpData();
+    // Optional: Skip full reload for better performance - data is already updated optimistically
+    // await loadDumps(); // Commented out for speed - uncomment if cross-device sync is critical
     
   } catch (error) {
-    console.error('Error deleting dump:', error);
+    console.error('Error deleting inventory dump:', error);
     ElNotification({
       title: 'Error',
-      message: 'Failed to delete dump: ' + error.message,
+      message: 'Failed to delete inventory dump: ' + error.message,
       type: 'error'
     });
   } finally {
@@ -417,7 +459,7 @@ onMounted(async () => {
             <button 
               @click="showAddModal = true"
               :disabled="loading"
-              class="w-full sm:w-auto inline-flex items-center justify-center px-4 sm:px-6 py-3 border border-transparent text-sm sm:text-base font-medium rounded-lg shadow-sm text-white bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              class="w-full sm:w-auto inline-flex items-center justify-center px-4 sm:px-6 py-3 border border-transparent text-sm sm:text-base font-medium rounded-lg shadow-sm text-white bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:transform-none"
             >
               <svg class="w-4 sm:w-5 h-4 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>

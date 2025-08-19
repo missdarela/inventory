@@ -226,6 +226,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useInventoryDumpStore } from '../stores/inventoryDumpStore';
 import { ElNotification } from 'element-plus';
+import { supabase } from '../supabase';
 
 const route = useRoute();
 const router = useRouter();
@@ -233,56 +234,153 @@ const inventoryDumpStore = useInventoryDumpStore();
 
 const dumpData = ref([]);
 const loading = ref(false);
+const actualDumpName = ref('');
 
-// Get dumps from localStorage or default data (same as inventoryDump.vue)
-const getDumps = () => {
-  const savedDumps = localStorage.getItem('inventoryDumps');
-  if (savedDumps) {
-    return JSON.parse(savedDumps);
+// Clear all cache on component load
+const clearAllCache = () => {
+  try {
+    // Clear localStorage keys related to inventory dumps
+    const keysToRemove = [
+      'inventoryDumps',
+      'inventory_dumps',
+      'dumps_cache',
+      'dump_data',
+      'cached_dumps'
+    ];
+    
+    keysToRemove.forEach(key => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+    
+    console.log('✅ Cache cleared successfully');
+  } catch (error) {
+    console.warn('Failed to clear cache:', error);
   }
-  
-  // Default dumps - fallback if no localStorage data
-  return [
-    { id: 1, name: 'Heartland' },
-    { id: 2, name: 'Wireline' },
-    { id: 3, name: 'Ada' },
-    { id: 4, name: 'Oga Remy' },
-    { id: 5, name: 'Pastor (Remy)' },
-    { id: 6, name: 'Ebuka' },
-    { id: 7, name: 'More Grace' },
-    { id: 8, name: 'Ndony' },
-    { id: 9, name: 'Papa' },
-    { id: 10, name: 'Nkechi' },
-    { id: 11, name: 'Rugged Pastor' },
-    { id: 12, name: 'Madam Iyawo' },
-    { id: 13, name: 'Azuke' },
-    { id: 14, name: 'Chigozie' },
-    { id: 15, name: 'Francis FM' },
-    { id: 16, name: 'Igwe' },
-    { id: 17, name: 'Victor Amadi' },
-    { id: 18, name: 'Madam Joy' },
-    { id: 19, name: 'CAC' }
-  ];
 };
 
-const dumps = ref(getDumps());
+// Normalize dump name for consistent comparison
+const normalizeDumpName = (name) => {
+  if (!name) return '';
+  return name.toString()
+    .trim()
+    .split(/\s+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+};
 
-// Get dump name from route parameter
-const dumpName = computed(() => {
+// Load dump name using database-first approach with sequential ID assignment
+const loadDumpName = async () => {
   const dumpId = parseInt(route.params.id);
-  const dump = dumps.value.find(d => d.id === dumpId);
-  return dump ? dump.name : 'Unknown Dump';
+  console.log(`Loading dump name for ID: ${dumpId}`);
+  
+  // Load dumps in the same order as inventoryDump component
+  const allDumps = new Map();
+  let nextId = 1;
+  
+  try {
+    // Load from dumps table first (primary source)
+    const { data: customDumps, error: dumpsError } = await supabase
+      .from('dumps')
+      .select('id, dump_name, created_at, updated_at')
+      .order('id', { ascending: true });
+    
+    if (!dumpsError && customDumps && customDumps.length > 0) {
+      console.log(`Loading ${customDumps.length} dumps from dumps table`);
+      
+      customDumps.forEach((dump) => {
+        const normalizedName = normalizeDumpName(dump.dump_name);
+        const lowerKey = normalizedName.toLowerCase();
+        
+        allDumps.set(lowerKey, {
+          id: nextId++, // Sequential ID assignment
+          name: normalizedName,
+          dbId: dump.id
+        });
+      });
+    }
+    
+    // Fallback to dump_inventory if dumps table is empty
+    if (allDumps.size === 0) {
+      console.log('No dumps in dumps table, checking dump_inventory...');
+      
+      const { data: inventoryData, error: inventoryError } = await supabase
+        .from('dump_inventory')
+        .select('dump_name')
+        .not('dump_name', 'is', null)
+        .order('created_at', { ascending: true });
+      
+      if (!inventoryError && inventoryData && inventoryData.length > 0) {
+        // Get unique dump names in order they were created
+        const uniqueDumps = [];
+        const seen = new Set();
+        
+        inventoryData.forEach(item => {
+          if (item.dump_name && !seen.has(item.dump_name.toLowerCase())) {
+            seen.add(item.dump_name.toLowerCase());
+            uniqueDumps.push(item.dump_name);
+          }
+        });
+        
+        uniqueDumps.forEach(dumpName => {
+          const normalizedName = normalizeDumpName(dumpName);
+          const lowerKey = normalizedName.toLowerCase();
+          
+          allDumps.set(lowerKey, {
+            id: nextId++,
+            name: normalizedName,
+            dbId: null
+          });
+        });
+      }
+    }
+    
+    // Convert to array and sort by ID (ascending)
+    const dumpsArray = Array.from(allDumps.values());
+    dumpsArray.sort((a, b) => a.id - b.id);
+    
+    console.log(`Loaded ${dumpsArray.length} dumps:`, dumpsArray.map(d => `${d.name} (ID: ${d.id})`));
+    
+    // Find dump matching the requested ID
+    const targetDump = dumpsArray.find(dump => dump.id === dumpId);
+    
+    if (targetDump) {
+      actualDumpName.value = targetDump.name;
+      console.log(`✅ Found dump: ID ${dumpId} → "${targetDump.name}"`);
+    } else {
+      actualDumpName.value = 'Unknown Dump';
+      console.warn(`❌ Dump ID ${dumpId} not found`);
+    }
+    
+  } catch (error) {
+    console.error('Failed to load dump name:', error);
+    actualDumpName.value = 'Unknown Dump';
+  }
+};
+
+// Get dump name - uses database-loaded name
+const dumpName = computed(() => {
+  return actualDumpName.value || 'Loading...';
 });
 
 // Fetch dump data when component mounts
 const fetchDumpData = async () => {
-  if (!dumpName.value || dumpName.value === 'Unknown Dump') return;
+  if (!actualDumpName.value || actualDumpName.value === 'Unknown Dump') return;
   
   loading.value = true;
   try {
-    const data = await inventoryDumpStore.fetchDumpsByName(dumpName.value);
+    const data = await inventoryDumpStore.fetchDumpsByName(actualDumpName.value);
     dumpData.value = data || [];
-    console.log(`Loaded ${data?.length || 0} records for ${dumpName.value}`);
+    console.log(`Loaded ${data?.length || 0} records for ${actualDumpName.value}`);
+    
+    // Debug: Log data structure to identify missing fields
+    if (data && data.length > 0) {
+      console.log('Sample record structure:', data[0]);
+      console.log('Available fields:', Object.keys(data[0]));
+      console.log('total_amount_supplied:', data[0].total_amount_supplied);
+      console.log('amount_remaining:', data[0].amount_remaining);
+      console.log('quantity_remaining:', data[0].quantity_remaining);
+    }
   } catch (error) {
     console.error('Failed to fetch dump data:', error);
     dumpData.value = [];
@@ -450,7 +548,14 @@ const overallProgress = computed(() => {
   return Math.round((used / totalAmountSupplied.value) * 100);
 });
 
-onMounted(() => {
-  fetchDumpData();
+onMounted(async () => {
+  // Clear cache first
+  clearAllCache();
+  
+  // Load dump name from database
+  await loadDumpName();
+  
+  // Then fetch dump data
+  await fetchDumpData();
 });
 </script>

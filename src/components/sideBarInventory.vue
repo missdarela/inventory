@@ -51,19 +51,24 @@ const statusColorMap = {
   'CAC': 'bg-green-500 text-white'
 };
 
-// Capitalize first letter of each word
-const capitalizeName = (name) => {
+// Format money values
+function formatMoney(value) {
+  if (!value) return '0';
+  const numericValue = parseFloat(value.toString().replace(/[^\d.]/g, '')) || 0;
+  return numericValue.toLocaleString('en-US', { 
+    minimumFractionDigits: 0, 
+    maximumFractionDigits: 0 
+  });
+}
+
+// Capitalize name function
+function capitalizeName(name) {
   if (!name) return '';
-  return name.split(' ')
+  return name.toString()
+    .trim()
+    .split(/\s+/)
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
-};
-
-function formatMoney(amount) {
-  if (!amount) return '';
-  const num = amount.toString().replace(/[^\d.]/g, '');
-  if (!num) return '';
-  return `₦${parseFloat(num).toLocaleString('en-NG')}`;
 }
 
 function validateNumericInput(event) {
@@ -85,9 +90,9 @@ async function addRow() {
   
   const newRow = {
     dump_name: '',
-    deposit: '',
+    deposit: 0,
     date: now.toISOString().split('T')[0],
-    rate: '',
+    rate: 0,
     quantity_deposited: 0,
     quantity_supplied: 0,
     status: 'In supply',
@@ -97,7 +102,7 @@ async function addRow() {
   
   loading.value = true;
   try {
-    // Direct database insert like sideBarTracking
+    // Only save to inventory table for new empty rows
     const { data, error: inventoryError } = await supabase
       .from('inventory')
       .insert(newRow)
@@ -105,30 +110,9 @@ async function addRow() {
     
     if (inventoryError) throw inventoryError;
 
-    // Also add to dump_inventory for tracking
-    const dumpData = {
-      dump_name: newRow.dump_name,
-      deposit: 0,
-      date: newRow.date,
-      rate: 0,
-      quantity_deposited: 0,
-      total_amount_supplied: 0,
-      quantity_supplied: 0,
-      amount_remaining: 0,
-      quantity_remaining: 0,
-      status: newRow.status,
-      set_id: currentSetId.value
-    };
-
-    const { error: dumpError } = await supabase
-      .from('dump_inventory')
-      .insert(dumpData);
-
-    if (dumpError) throw dumpError;
-
-    // Add to local array with isEditing: true
+    // Add to local array with isEditing: true so user can immediately edit
     inventory.value.push({ ...data[0], isEditing: true });
-    ElMessage.success('New row added!');
+    ElMessage.success('New row added! Fill in the data and click Save.');
   } catch (error) {
     ElMessage.error('Failed to add row: ' + error.message);
   } finally {
@@ -138,11 +122,19 @@ async function addRow() {
 
 function canEdit(row) {
   if (row.editable_until === null) {
+    console.log(`Row ${row.id} is always editable (editable_until is null)`);
     return true;
   }
   const now = new Date();
   const editableUntil = new Date(row.editable_until);
   const canEditResult = now < editableUntil;
+  
+  console.log(`Row ${row.id} edit check:`, {
+    now: now.toISOString(),
+    editableUntil: editableUntil.toISOString(),
+    canEdit: canEditResult,
+    minutesRemaining: Math.max(0, Math.round((editableUntil - now) / (1000 * 60)))
+  });
   
   return canEditResult;
 }
@@ -153,12 +145,18 @@ async function saveRow(row) {
   const now = new Date();
   const newEditableUntil = new Date(now.getTime() + EDIT_WINDOW_MINUTES * 60 * 1000).toISOString();
 
+  console.log(`Setting 5-minute lock for row ${row.id}:`, {
+    now: now.toISOString(),
+    editableUntil: newEditableUntil,
+    lockDurationMinutes: EDIT_WINDOW_MINUTES
+  });
+
   const updates = {
     id: row.id,
     dump_name: capitalizeName(row.dump_name),
-    deposit: formatMoney(row.deposit),
+    deposit: parseFloat(row.deposit?.toString().replace(/[^\d.]/g, '')) || 0,
     date: row.date,
-    rate: formatMoney(row.rate),
+    rate: parseFloat(row.rate?.toString().replace(/[^\d.]/g, '')) || 0,
     quantity_deposited: row.quantity_deposited,
     quantity_supplied: row.quantity_supplied,
     status: row.status,
@@ -184,22 +182,61 @@ async function saveRow(row) {
       date: row.date,
       rate: parseFloat(row.rate?.toString().replace(/[^\d.]/g, '')) || 0,
       quantity_deposited: parseInt(row.quantity_deposited) || 0,
-      total_amount_supplied: parseFloat(getTotalSuppliedAmount(row).replace(/[^\d.]/g, '')) || 0,
+      total_amount_supplied: parseFloat(getTotalSuppliedAmount(row)) || 0,
       quantity_supplied: parseInt(row.quantity_supplied) || 0,
-      amount_remaining: parseFloat(getAmountRemaining(row).replace(/[^\d.]/g, '')) || 0,
+      amount_remaining: parseFloat(getAmountRemaining(row)) || 0,
       quantity_remaining: parseInt(getQuantityRemaining(row)) || 0,
       status: row.status,
       set_id: currentSetId.value,
       updated_at: new Date().toISOString()
     };
 
-    // Use upsert to handle both insert and update cases
-    const { error: dumpError } = await supabase
+    // Debug: Log the calculated values
+    console.log('=== DUMP DATA CALCULATION DEBUG ===');
+    console.log('Row data:', row);
+    console.log('getTotalSuppliedAmount result:', getTotalSuppliedAmount(row));
+    console.log('getAmountRemaining result:', getAmountRemaining(row));
+    console.log('getQuantityRemaining result:', getQuantityRemaining(row));
+    console.log('Final dumpData:', dumpData);
+    console.log('=====================================');
+
+    // Validate required fields before saving to dump_inventory
+    const normalizedDumpName = capitalizeName(row.dump_name);
+    if (!normalizedDumpName || normalizedDumpName.trim() === '') {
+      console.warn('Skipping dump_inventory save - empty dump_name');
+      ElMessage.success('Row saved to inventory!');
+      return;
+    }
+
+    // Check if record exists in dump_inventory first
+    const { data: existingRecord, error: checkError } = await supabase
       .from('dump_inventory')
-      .upsert(dumpData, { 
-        onConflict: 'dump_name,set_id,date',
-        ignoreDuplicates: false 
-      });
+      .select('id')
+      .eq('dump_name', normalizedDumpName)
+      .eq('set_id', currentSetId.value)
+      .eq('date', row.date)
+      .single();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.warn('Error checking existing record:', checkError);
+      // Continue with insert anyway
+    }
+
+    let dumpError;
+    if (existingRecord) {
+      // Update existing record
+      const { error } = await supabase
+        .from('dump_inventory')
+        .update(dumpData)
+        .eq('id', existingRecord.id);
+      dumpError = error;
+    } else {
+      // Insert new record
+      const { error } = await supabase
+        .from('dump_inventory')
+        .insert(dumpData);
+      dumpError = error;
+    }
 
     if (dumpError) {
       console.warn('Dump inventory upsert failed:', dumpError);
@@ -271,20 +308,20 @@ function getTotalSuppliedAmount(row) {
   const rate = parseFloat(row.rate?.toString().replace(/[^\d.]/g, '')) || 0;
   const quantitySupplied = parseFloat(row.quantity_supplied?.toString().replace(/[^\d.]/g, '')) || 0;
   const total = rate * quantitySupplied;
-  return total > 0 ? formatMoney(total.toString()) : '';
+  return total > 0 ? total.toString() : '0';
 }
 
 function getAmountRemaining(row) {
   const deposit = parseFloat(row.deposit?.toString().replace(/[^\d.]/g, '')) || 0;
-  const totalSupplied = parseFloat(getTotalSuppliedAmount(row).replace(/[^\d.]/g, '')) || 0;
+  const totalSupplied = parseFloat(getTotalSuppliedAmount(row)) || 0;
   const remaining = deposit - totalSupplied;
-  return remaining >= 0 ? formatMoney(remaining.toString()) : formatMoney('0');
+  return remaining >= 0 ? remaining.toString() : '0';
 }
 
 function getQuantityRemaining(row) {
   const quantityDeposited = parseFloat(row.quantity_deposited?.toString().replace(/[^\d.]/g, '')) || 0;
   const quantitySupplied = parseFloat(row.quantity_supplied?.toString().replace(/[^\d.]/g, '')) || 0;
-  const remaining = quantitySupplied - quantityDeposited; // 
+  const remaining = quantitySupplied - quantityDeposited;
   return remaining >= 0 ? remaining.toString() : '0';
 }
 
@@ -302,7 +339,7 @@ async function handleGenerateReport() {
     }, 0);
 
     const totalAmountRemaining = inventory.value.reduce((sum, item) => {
-      const remaining = parseFloat(getAmountRemaining(item).replace(/[^\d.]/g, '')) || 0;
+      const remaining = parseFloat(getAmountRemaining(item)) || 0;
       return sum + remaining;
     }, 0);
 
@@ -451,7 +488,7 @@ const exportInventory = () => {
             </td>
             <td class="px-2 py-2 border border-blue-200 text-center">
               <input v-if="row.isEditing && canEdit(row)" v-model="row.deposit" class="border rounded px-1 py-0.5 w-full text-sm" @keydown="validateNumericInput" />
-              <span v-else>{{ row.deposit }}</span>
+              <span v-else>{{ formatMoney(row.deposit) }}</span>
             </td>
             <td class="px-2 py-2 border border-blue-200 text-center">
               <input v-if="row.isEditing && canEdit(row)" v-model="row.date" type="date" class="border rounded px-1 py-0.5 w-full text-sm" @keydown="validateDateInput" />
@@ -459,7 +496,7 @@ const exportInventory = () => {
             </td>
             <td class="px-2 py-2 border border-blue-200 text-center">
               <input v-if="row.isEditing && canEdit(row)" v-model="row.rate" class="border rounded px-1 py-0.5 w-full text-sm" @keydown="validateNumericInput" />
-              <span v-else>{{ row.rate }}</span>
+              <span v-else>{{ formatMoney(row.rate) }}</span>
             </td>
             <td class="px-2 py-2 border border-blue-200 text-center">
               <input v-if="row.isEditing && canEdit(row)" v-model="row.quantity_deposited" class="border rounded px-1 py-0.5 w-full text-sm" @keydown="validateNumericInput" />
@@ -469,8 +506,8 @@ const exportInventory = () => {
               <input v-if="row.isEditing && canEdit(row)" v-model="row.quantity_supplied" class="border rounded px-1 py-0.5 w-full text-sm" @keydown="validateNumericInput" />
               <span v-else>{{ row.quantity_supplied }}</span>
             </td>
-            <td class="px-2 py-2 border border-blue-200 text-sm text-center">{{ getTotalSuppliedAmount(row) }}</td>
-            <td class="px-2 py-2 border border-blue-200 text-sm text-center">{{ getAmountRemaining(row) }}</td>
+            <td class="px-2 py-2 border border-blue-200 text-sm text-center">{{ formatMoney(getTotalSuppliedAmount(row)) }}</td>
+            <td class="px-2 py-2 border border-blue-200 text-sm text-center">{{ formatMoney(getAmountRemaining(row)) }}</td>
             <td class="px-2 py-2 border border-blue-200 text-sm text-center">{{ getQuantityRemaining(row) }}</td>
             <td class="px-2 py-2 border border-blue-200 text-center">
               <select v-if="row.isEditing && canEdit(row)" v-model="row.status" class="border rounded px-1 py-0.5 w-full text-center text-sm">
