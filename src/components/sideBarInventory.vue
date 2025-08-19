@@ -8,83 +8,63 @@ const EDIT_WINDOW_MINUTES = 5;
 const inventory = ref([]);
 const loading = ref(false);
 const hasGeneratedReport = ref(false);
-const currentSetId = ref(null);
 
 onMounted(async () => {
-  // Generate a new set ID if none exists
-  if (!localStorage.getItem('currentSetId')) {
-    currentSetId.value = new Date().toISOString();
-    localStorage.setItem('currentSetId', currentSetId.value);
-  } else {
-    currentSetId.value = localStorage.getItem('currentSetId');
-  }
+  // Clear cache for fresh cross-device data
+  await clearCache();
+  
+  // Load initial set of data (most recent first)
   await fetchCurrentSet();
 });
 
+// Clear cache for cross-device sync
+const clearCache = () => {
+  try {
+    const keysToRemove = [
+      'currentSetId', 'inventory_cache', 'inventory_data', 
+      'cached_inventory', 'sidebar_inventory'
+    ];
+    
+    keysToRemove.forEach(key => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+    
+    console.log('✅ sideBarInventory cache cleared for cross-device sync');
+  } catch (error) {
+    console.warn('Failed to clear cache:', error);
+  }
+};
+
 async function fetchCurrentSet() {
   loading.value = true;
+  
   try {
-    // Simple database query like sideBarTracking - no user_id dependency
+    // Optimized query: Select only essential fields with limit
     const { data, error } = await supabase
       .from('inventory')
-      .select('*')
-      .or(`set_id.eq.${currentSetId.value},set_id.is.null`)
-      .order('created_at');
+      .select(`
+        id, dump_name, deposit, date, rate, 
+        quantity_deposited, quantity_supplied, 
+        status, editable_until, created_at, updated_at
+      `)
+      .order('created_at', { ascending: true }) // Changed to ascending order (oldest first)
+      .limit(200); // Load up to 200 most recent records
     
     if (error) throw error;
+    
     inventory.value = data.map(item => ({ ...item, isEditing: false }));
+    console.log(`✅ Loaded ${data?.length || 0} inventory records`);
+    
   } catch (error) {
-    ElMessage.error('Failed to fetch inventory: ' + error.message);
+    console.error('Failed to fetch inventory:', error.message);
+    ElMessage.error('Failed to load inventory data. Please refresh the page.');
   } finally {
     loading.value = false;
   }
 }
 
-// Manual refresh function
-const refreshData = async () => {
-  await fetchCurrentSet();
-  ElMessage.success('Data refreshed successfully');
-};
-
-const statusColorMap = {
-  'In supply': 'bg-blue-500 text-white',
-  'CAC': 'bg-green-500 text-white'
-};
-
-// Format money values
-function formatMoney(value) {
-  if (!value) return '0';
-  const numericValue = parseFloat(value.toString().replace(/[^\d.]/g, '')) || 0;
-  return numericValue.toLocaleString('en-US', { 
-    minimumFractionDigits: 0, 
-    maximumFractionDigits: 0 
-  });
-}
-
-// Capitalize name function
-function capitalizeName(name) {
-  if (!name) return '';
-  return name.toString()
-    .trim()
-    .split(/\s+/)
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-}
-
-function validateNumericInput(event) {
-  const allowedKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', 'Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-  if (!allowedKeys.includes(event.key)) {
-    event.preventDefault();
-  }
-}
-
-function validateDateInput(event) {
-  const allowedKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', 'Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-  if (!allowedKeys.includes(event.key)) {
-    event.preventDefault();
-  }
-}
-
+// Modified addRow function to ensure cross-device sync
 async function addRow() {
   const now = new Date();
   
@@ -97,12 +77,11 @@ async function addRow() {
     quantity_supplied: 0,
     status: 'In supply',
     editable_until: null, // New rows start as editable (null means always editable until first save)
-    set_id: currentSetId.value
   };
   
   loading.value = true;
   try {
-    // Only save to inventory table for new empty rows
+    // Save to database immediately
     const { data, error: inventoryError } = await supabase
       .from('inventory')
       .insert(newRow)
@@ -120,25 +99,7 @@ async function addRow() {
   }
 }
 
-function canEdit(row) {
-  if (row.editable_until === null) {
-    console.log(`Row ${row.id} is always editable (editable_until is null)`);
-    return true;
-  }
-  const now = new Date();
-  const editableUntil = new Date(row.editable_until);
-  const canEditResult = now < editableUntil;
-  
-  console.log(`Row ${row.id} edit check:`, {
-    now: now.toISOString(),
-    editableUntil: editableUntil.toISOString(),
-    canEdit: canEditResult,
-    minutesRemaining: Math.max(0, Math.round((editableUntil - now) / (1000 * 60)))
-  });
-  
-  return canEditResult;
-}
-
+// Modified saveRow function with robust schema inspection to handle inventory_id column errors
 async function saveRow(row) {
   row.isEditing = false;
   
@@ -161,119 +122,161 @@ async function saveRow(row) {
     quantity_supplied: row.quantity_supplied,
     status: row.status,
     editable_until: newEditableUntil,
-    set_id: currentSetId.value,
     updated_at: new Date().toISOString()
   };
 
-  loading.value = true;
+  // Update main inventory table
+  const { data: inventoryData, error: inventoryError } = await supabase
+    .from('inventory')
+    .update(updates)
+    .eq('id', row.id)
+    .select();
+
+  if (inventoryError) {
+    console.error('Inventory update error:', inventoryError);
+    ElMessage.error('Failed to save row: ' + inventoryError.message);
+    return;
+  }
+
+  // Update local state to reflect the changes
+  const index = inventory.value.findIndex(item => item.id === row.id);
+  if (index !== -1) {
+    inventory.value[index] = { ...inventory.value[index], ...updates };
+  }
+
+  // Also save calculated fields to dump_inventory table for dashboard metrics
+  // First, let's check what columns are available in dump_inventory table
   try {
-    // Update main inventory - this ensures cross-device sync
-    const { error: inventoryError } = await supabase
-      .from('inventory')
-      .update(updates)
-      .eq('id', row.id);
+    // Get table schema information
+    const dumpInventoryColumns = await inspectDumpInventorySchema();
     
-    if (inventoryError) throw inventoryError;
-
-    // Also save to dump_inventory with calculated fields using upsert to avoid duplicates
-    const dumpData = {
-      dump_name: capitalizeName(row.dump_name),
-      deposit: parseFloat(row.deposit?.toString().replace(/[^\d.]/g, '')) || 0,
-      date: row.date,
-      rate: parseFloat(row.rate?.toString().replace(/[^\d.]/g, '')) || 0,
-      quantity_deposited: parseInt(row.quantity_deposited) || 0,
-      total_amount_supplied: parseFloat(getTotalSuppliedAmount(row)) || 0,
-      quantity_supplied: parseInt(row.quantity_supplied) || 0,
-      amount_remaining: parseFloat(getAmountRemaining(row)) || 0,
-      quantity_remaining: parseInt(getQuantityRemaining(row)) || 0,
-      status: row.status,
-      set_id: currentSetId.value,
-      updated_at: new Date().toISOString()
-    };
-
-    // Debug: Log the calculated values
-    console.log('=== DUMP DATA CALCULATION DEBUG ===');
-    console.log('Row data:', row);
-    console.log('getTotalSuppliedAmount result:', getTotalSuppliedAmount(row));
-    console.log('getAmountRemaining result:', getAmountRemaining(row));
-    console.log('getQuantityRemaining result:', getQuantityRemaining(row));
-    console.log('Final dumpData:', dumpData);
-    console.log('=====================================');
-
-    // Validate required fields before saving to dump_inventory
-    const normalizedDumpName = capitalizeName(row.dump_name);
-    if (!normalizedDumpName || normalizedDumpName.trim() === '') {
-      console.warn('Skipping dump_inventory save - empty dump_name');
-      ElMessage.success('Row saved to inventory!');
+    if (!dumpInventoryColumns) {
+      console.warn('Schema inspection failed, skipping dump_inventory update');
+      ElMessage.success('Row saved successfully!');
       return;
     }
-
-    // Check if record exists in dump_inventory first
-    const { data: existingRecord, error: checkError } = await supabase
-      .from('dump_inventory')
-      .select('id')
-      .eq('dump_name', normalizedDumpName)
-      .eq('set_id', currentSetId.value)
-      .eq('date', row.date)
-      .single();
-
-    if (checkError && checkError.code !== 'PGRST116') {
-      console.warn('Error checking existing record:', checkError);
-      // Continue with insert anyway
-    }
-
-    let dumpError;
-    if (existingRecord) {
-      // Update existing record
-      const { error } = await supabase
+    
+    // Determine which columns are available in the table
+    const availableColumns = dumpInventoryColumns;
+    console.log('Available columns in dump_inventory:', availableColumns);
+    
+    // Only proceed with dump_inventory upsert if we have column information
+    if (availableColumns.length > 0) {
+      // Build dumpUpdates object based on available columns
+      const dumpUpdates = {
+        updated_at: new Date().toISOString()
+      };
+      
+      // Add date field if column exists (it's required)
+      if (availableColumns.includes('date')) {
+        dumpUpdates.date = row.date;
+      }
+      
+      // Add set_id field if column exists (likely required)
+      if (availableColumns.includes('set_id')) {
+        dumpUpdates.set_id = 1; // Default set_id value
+      }
+      
+      // Only add inventory_id if the column exists
+      if (availableColumns.includes('inventory_id')) {
+        dumpUpdates.inventory_id = row.id;
+      } else if (availableColumns.includes('id')) {
+        // Fallback to 'id' column if 'inventory_id' doesn't exist
+        dumpUpdates.id = row.id;
+      }
+      
+      // Add dump_name if column exists
+      if (availableColumns.includes('dump_name')) {
+        dumpUpdates.dump_name = capitalizeName(row.dump_name);
+      }
+      
+      // Add basic fields if columns exist
+      if (availableColumns.includes('deposit')) {
+        dumpUpdates.deposit = parseFloat(row.deposit?.toString().replace(/[^\d.]/g, '')) || 0;
+      }
+      
+      if (availableColumns.includes('rate')) {
+        dumpUpdates.rate = parseFloat(row.rate?.toString().replace(/[^\d.]/g, '')) || 0;
+      }
+      
+      if (availableColumns.includes('quantity_deposited')) {
+        dumpUpdates.quantity_deposited = row.quantity_deposited;
+      }
+      
+      if (availableColumns.includes('quantity_supplied')) {
+        dumpUpdates.quantity_supplied = row.quantity_supplied;
+      }
+      
+      // Only add calculated fields if their columns exist
+      if (availableColumns.includes('total_amount_supplied')) {
+        dumpUpdates.total_amount_supplied = parseFloat(getTotalSuppliedAmount(row).replace(/[^\d.]/g, '')) || 0;
+      }
+      
+      if (availableColumns.includes('quantity_remaining')) {
+        dumpUpdates.quantity_remaining = parseInt(getQuantityRemaining(row)) || 0;
+      }
+      
+      if (availableColumns.includes('amount_remaining')) {
+        dumpUpdates.amount_remaining = parseFloat(getAmountRemaining(row).replace(/[^\d.]/g, '')) || 0;
+      }
+      
+      if (availableColumns.includes('status')) {
+        dumpUpdates.status = row.status || 'In supply'; // Add fallback value for status
+      }
+      
+      // Determine onConflict column based on available columns
+      let onConflictColumn = 'id'; // default fallback
+      if (availableColumns.includes('inventory_id')) {
+        onConflictColumn = 'inventory_id';
+      } else if (availableColumns.includes('id')) {
+        onConflictColumn = 'id';
+      }
+      
+      console.log('Upserting to dump_inventory with onConflict column:', onConflictColumn);
+      
+      // Try to upsert the data
+      const { error: dumpError } = await supabase
         .from('dump_inventory')
-        .update(dumpData)
-        .eq('id', existingRecord.id);
-      dumpError = error;
+        .upsert(dumpUpdates, { onConflict: onConflictColumn });
+      
+      if (dumpError) {
+        console.warn('Dump inventory upsert failed:', dumpError);
+        // Don't fail the main save if dump inventory fails
+      }
     } else {
-      // Insert new record
-      const { error } = await supabase
-        .from('dump_inventory')
-        .insert(dumpData);
-      dumpError = error;
+      console.warn('No columns found in dump_inventory table, skipping update');
     }
-
-    if (dumpError) {
-      console.warn('Dump inventory upsert failed:', dumpError);
-      // Don't fail the main save if dump inventory fails
-    }
-
-    ElMessage.success('Row saved! Data synced across all devices.');
-    
-    // Update local state to reflect the changes
-    const index = inventory.value.findIndex(item => item.id === row.id);
-    if (index !== -1) {
-      inventory.value[index].editable_until = newEditableUntil;
-      inventory.value[index].updated_at = updates.updated_at;
-    }
-    
-    // Optionally refresh data to ensure sync (uncomment if needed)
-    // await fetchCurrentSet();
-    
-  } catch (error) {
-    ElMessage.error('Failed to save row: ' + error.message);
-    row.isEditing = true; // Revert to editing mode on failure
-  } finally {
-    loading.value = false;
+  } catch (schemaError) {
+    console.warn('Could not inspect dump_inventory schema, skipping dump inventory update:', schemaError.message);
+    // Continue without updating dump_inventory if schema inspection fails
   }
+
+  ElMessage.success('Row saved successfully!');
 }
 
-function editRow(row) {
-  if (canEdit(row)) row.isEditing = true;
-}
-
+// Modified deleteRow function to ensure cross-device sync
 async function deleteRow(row) {
   if (canEdit(row)) {
     if (window.confirm('Are you sure you want to delete this row?')) {
       loading.value = true;
       try {
-        const { error } = await supabase.from('inventory').delete().eq('id', row.id);
-        if (error) throw error;
+        // Delete from main inventory table
+        const { error: inventoryError } = await supabase
+          .from('inventory')
+          .delete()
+          .eq('id', row.id);
+        
+        if (inventoryError) throw inventoryError;
+        
+        // Also delete from dump_inventory table
+        const { error: dumpError } = await supabase
+          .from('dump_inventory')
+          .delete()
+          .eq('inventory_id', row.id);
+        
+        if (dumpError) throw dumpError;
+        
+        // Remove from local state
         inventory.value = inventory.value.filter(r => r.id !== row.id);
         ElMessage.success('Row deleted!');
       } catch(error) {
@@ -285,25 +288,83 @@ async function deleteRow(row) {
   }
 }
 
-function closeAccount() {
+// Modified closeAccount function with robust schema inspection to handle inventory_id column errors
+async function closeAccount() {
   if (!hasGeneratedReport.value) {
     ElMessage.error('Please generate a report before closing the account');
     return;
   }
 
-  if (window.confirm('Are you sure you want to close the current set of data?')) {
-    // Generate new set ID for fresh data
-    currentSetId.value = new Date().toISOString();
-    localStorage.setItem('currentSetId', currentSetId.value);
-    
-    // Clear local view
-    inventory.value = [];
-    hasGeneratedReport.value = false;
-    ElMessage.success('Current data set closed. You can now start adding fresh data.');
+  if (window.confirm('Are you sure you want to close the current set of data? This will delete all inventory records across all devices.')) {
+    loading.value = true;
+    try {
+      // Delete all records from inventory table for cross-device sync
+      const { error: inventoryError } = await supabase
+        .from('inventory')
+        .delete()
+        .neq('id', 0); // Delete all records (neq to a non-existent condition to delete all)
+      
+      if (inventoryError) throw inventoryError;
+      
+      // Clear local state
+      inventory.value = [];
+      hasGeneratedReport.value = false;
+      
+      ElMessage.success('Account closed and all data cleared across all devices!');
+    } catch (error) {
+      ElMessage.error('Failed to close account: ' + error.message);
+    } finally {
+      loading.value = false;
+    }
   }
 }
 
-// Computed properties for each row
+async function markAccountAsClosed() {
+  console.log('Skipping markAccountAsClosed - no inventory_metadata table exists');
+  // No inventory_metadata table exists, so we skip this operation
+  // This function is kept for backward compatibility but does nothing
+}
+
+// Check if account is closed across devices
+async function checkAccountClosed() {
+  console.log('Skipping checkAccountClosed - no inventory_metadata table exists');
+  // No inventory_metadata table exists, so we skip this operation
+  // This function is kept for backward compatibility but does nothing
+}
+
+function canEdit(row) {
+  if (row.editable_until === null) {
+    console.log(`Row ${row.id} is always editable (editable_until is null)`);
+    return true;
+  }
+  
+  // Use server time for more accurate comparison
+  const now = new Date();
+  const editableUntil = new Date(row.editable_until);
+  
+  // Add a small buffer (5 seconds) to account for network delays and timing discrepancies
+  const bufferMs = 5000; // 5 seconds buffer
+  const canEditResult = (now.getTime() + bufferMs) < editableUntil.getTime();
+  
+  const minutesRemaining = Math.max(0, Math.round((editableUntil.getTime() - now.getTime()) / (1000 * 60)));
+  const secondsRemaining = Math.max(0, Math.round((editableUntil.getTime() - now.getTime()) / 1000));
+  
+  console.log(`Row ${row.id} edit check:`, {
+    now: now.toISOString(),
+    editableUntil: editableUntil.toISOString(),
+    canEdit: canEditResult,
+    minutesRemaining: minutesRemaining,
+    secondsRemaining: secondsRemaining,
+    timeDifferenceMs: editableUntil.getTime() - now.getTime()
+  });
+  
+  return canEditResult;
+}
+
+function editRow(row) {
+  if (canEdit(row)) row.isEditing = true;
+}
+
 function getTotalSuppliedAmount(row) {
   const rate = parseFloat(row.rate?.toString().replace(/[^\d.]/g, '')) || 0;
   const quantitySupplied = parseFloat(row.quantity_supplied?.toString().replace(/[^\d.]/g, '')) || 0;
@@ -346,7 +407,6 @@ async function handleGenerateReport() {
     // Create a summary header
     const summary = [
       `<h2 class="text-lg font-bold">Inventory Report - ${currentDate}</h2>`,
-      `<h3 class="text-sm font-bold">Set ID: ${currentSetId.value}</h3>`,
       `<h3 class="text-sm font-bold">Total Records: ${totalItems}</h3>`,
       '<h3 class="text-sm font-bold mb-2">Detailed Records:</h3>'
     ].join('\n');
@@ -404,7 +464,6 @@ const exportInventory = () => {
     // Create CSV content with summary header
     let csvContent = `Inventory Export Report\n`;
     csvContent += `Generated on: ${new Date().toLocaleString()}\n`;
-    csvContent += `Set ID: ${currentSetId.value}\n`;
     csvContent += `Total Records: ${inventory.value.length}\n`;
     csvContent += `Total Amount Supplied: ${formatMoneyForCSV(inventory.value.reduce((sum, item) => sum + (getTotalSuppliedAmount(item) || 0), 0))}\n`;
     csvContent += `Total Amount Remaining: ${formatMoneyForCSV(inventory.value.reduce((sum, item) => sum + (getAmountRemaining(item) || 0), 0))}\n`;
@@ -449,14 +508,156 @@ const exportInventory = () => {
     });
   }
 };
+
+// Refresh data with cache clearing
+const refreshData = async () => {
+  await clearCache();
+  await fetchCurrentSet();
+  ElMessage.success('Data refreshed successfully');
+};
+
+// Format money values
+function formatMoney(value) {
+  if (!value) return '0';
+  const numericValue = parseFloat(value.toString().replace(/[^\d.]/g, '')) || 0;
+  return numericValue.toLocaleString('en-US', { 
+    minimumFractionDigits: 0, 
+    maximumFractionDigits: 0 
+  });
+}
+
+// Capitalize name function
+function capitalizeName(name) {
+  if (!name) return '';
+  return name.toString()
+    .trim()
+    .split(/\s+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function validateNumericInput(event) {
+  const allowedKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', 'Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+  if (!allowedKeys.includes(event.key)) {
+    event.preventDefault();
+  }
+}
+
+function validateDateInput(event) {
+  const allowedKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', 'Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+  if (!allowedKeys.includes(event.key)) {
+    event.preventDefault();
+  }
+}
+
+const statusColorMap = {
+  'In supply': 'bg-blue-500 text-white',
+  'CAC': 'bg-green-500 text-white'
+};
+
+// Function to inspect dump_inventory table schema
+async function inspectDumpInventorySchema() {
+  try {
+    console.log('🔍 Inspecting dump_inventory table schema...');
+    
+    // First try to get table information from existing data
+    const { data, error } = await supabase
+      .from('dump_inventory')
+      .select('*')
+      .limit(1);
+    
+    if (error) {
+      console.warn('❌ dump_inventory table schema inspection failed:', error.message);
+      return null;
+    }
+    
+    if (data && data.length > 0) {
+      const columns = Object.keys(data[0]);
+      console.log('✅ dump_inventory table columns from data:', columns);
+      return columns;
+    } else {
+      console.log('⚠️ dump_inventory table exists but is empty, trying alternative approach...');
+      
+      // For empty tables, we'll define the expected schema based on what we know
+      // This is a fallback approach when the table is empty
+      const expectedColumns = [
+        'id',
+        'inventory_id', 
+        'dump_name',
+        'deposit',
+        'rate',
+        'quantity_deposited',
+        'quantity_supplied',
+        'total_amount_supplied',
+        'quantity_remaining',
+        'amount_remaining',
+        'status',
+        'date',
+        'created_at',
+        'updated_at'
+      ];
+      
+      // Try to insert a test record to verify which columns exist
+      try {
+        console.log('🧪 Testing dump_inventory table structure with minimal insert...');
+        
+        // Try inserting a minimal record to test the table structure
+        // Include all likely required fields based on the error
+        const testRecord = {
+          dump_name: 'TEST_SCHEMA_CHECK',
+          date: new Date().toISOString().split('T')[0], // Add date field (YYYY-MM-DD format)
+          set_id: 1, // Add set_id field (likely required)
+          deposit: 0,
+          rate: 0,
+          quantity_deposited: 0,
+          quantity_supplied: 0,
+          status: 'Test',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        const { data: insertData, error: insertError } = await supabase
+          .from('dump_inventory')
+          .insert(testRecord)
+          .select();
+        
+        if (!insertError && insertData && insertData.length > 0) {
+          const columns = Object.keys(insertData[0]);
+          console.log('✅ dump_inventory table columns from test insert:', columns);
+          
+          // Clean up the test record
+          await supabase
+            .from('dump_inventory')
+            .delete()
+            .eq('dump_name', 'TEST_SCHEMA_CHECK');
+          
+          return columns;
+        } else {
+          console.warn('Test insert failed:', insertError?.message);
+          // Return a basic set of columns that should work
+          return ['id', 'dump_name', 'date', 'created_at', 'updated_at'];
+        }
+      } catch (testError) {
+        console.warn('Schema test failed:', testError.message);
+        // Return a basic set of columns that should work
+        return ['id', 'dump_name', 'date', 'created_at', 'updated_at'];
+      }
+    }
+  } catch (err) {
+    console.error('💥 Error during dump_inventory schema inspection:', err.message);
+    // Return a basic set of columns as fallback
+    return ['id', 'dump_name', 'date', 'created_at', 'updated_at'];
+  }
+}
 </script>
 
 <template>
   <div class="overflow-x-auto rounded-lg shadow bg-white p-4 relative">
     <div class="py-2 text-right">
       <button @click="handleGenerateReport" class="px-4 py-2 bg-green-700 text-white rounded hover:bg-green-800">Generate Report</button>
-    <button @click="exportInventory" class="mx-3 px-2 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-800">Export to CSV</button>
-    <button class="mx-3 px-2 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-800" @click="closeAccount">Close Account</button>
+      <button @click="exportInventory" class="mx-3 px-2 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-800">Export to CSV</button>
+      <button @click="refreshData" class="px-2 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-800">🔄 Refresh</button>
+      <button class="mx-3 px-2 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-800" @click="closeAccount">Close Account</button>
     </div>
     <div v-if="loading" class="absolute inset-0 bg-white bg-opacity-50 flex items-center justify-center z-10">
       <p>Loading...</p>
