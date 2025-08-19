@@ -509,13 +509,6 @@ const exportInventory = () => {
   }
 };
 
-// Refresh data with cache clearing
-const refreshData = async () => {
-  await clearCache();
-  await fetchCurrentSet();
-  ElMessage.success('Data refreshed successfully');
-};
-
 // Format money values
 function formatMoney(value) {
   if (!value) return '0';
@@ -656,7 +649,6 @@ async function inspectDumpInventorySchema() {
     <div class="py-2 text-right">
       <button @click="handleGenerateReport" class="px-4 py-2 bg-green-700 text-white rounded hover:bg-green-800">Generate Report</button>
       <button @click="exportInventory" class="mx-3 px-2 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-800">Export to CSV</button>
-      <button @click="refreshData" class="px-2 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-800">🔄 Refresh</button>
       <button class="mx-3 px-2 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-800" @click="closeAccount">Close Account</button>
     </div>
     <div v-if="loading" class="absolute inset-0 bg-white bg-opacity-50 flex items-center justify-center z-10">

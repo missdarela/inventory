@@ -25,19 +25,16 @@ export const useInventoryDumpStore = defineStore('inventoryDump', () => {
                 created_at: new Date().toISOString()
             };
 
-            console.log('Saving to dump_inventory:', dumpData); // Debug log
-
             const { data, error } = await supabase
                 .from('dump_inventory')
                 .insert(dumpData)
                 .select();
 
             if (error) {
-                console.error('Supabase error:', error); // Debug log
+                console.error('Supabase error:', error); 
                 throw error;
             }
 
-            console.log('Successfully saved:', data); // Debug log
             dumps.value = [...dumps.value, data[0]];
             return data[0];
         } catch (error) {
@@ -51,9 +48,6 @@ export const useInventoryDumpStore = defineStore('inventoryDump', () => {
     async function fetchDumpsByName(dumpName) {
         loading.value = true;
         try {
-            console.log(`Fetching data for dump: ${dumpName}`);
-            
-            // Fetch from dump_inventory table (where calculated fields are stored)
             const { data, error } = await supabase
                 .from('dump_inventory')
                 .select('*')
@@ -64,9 +58,6 @@ export const useInventoryDumpStore = defineStore('inventoryDump', () => {
                 console.error('Error querying dump_inventory:', error);
                 throw error;
             }
-            
-            console.log(`Found ${data?.length || 0} records in dump_inventory table`);
-            console.log('Sample record:', data?.[0]); // Debug log to see data structure
             
             return data || [];
         } catch (error) {
@@ -119,8 +110,6 @@ export const useInventoryDumpStore = defineStore('inventoryDump', () => {
                 set_id: 1  
             };
 
-            console.log('Saving dump metadata:', dumpEntry);
-
             const { data, error } = await supabase
                 .from('dump_inventory')
                 .insert(dumpEntry)
@@ -131,7 +120,6 @@ export const useInventoryDumpStore = defineStore('inventoryDump', () => {
                 throw error;
             }
 
-            console.log('Successfully saved dump metadata:', data);
             return data[0];
         } catch (error) {
             console.error('Failed to save dump metadata:', error);

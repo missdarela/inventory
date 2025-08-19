@@ -61,8 +61,6 @@ const initializeDumps = async () => {
       if (dumpsError) {
         console.error('Error loading tracking dumps:', dumpsError);
       } else if (customDumps && customDumps.length > 0) {
-        console.log(`Loading ${customDumps.length} dumps from tracking_dumps table`);
-        
         customDumps.forEach((dump) => {
           const normalizedName = normalizeDumpName(dump.name);
           const lowerKey = normalizedName.toLowerCase();
@@ -79,23 +77,21 @@ const initializeDumps = async () => {
         });
       }
     } catch (dbError) {
-      console.warn('Database query failed for tracking_dumps, starting with empty list:', dbError);
+      console.error('Database query failed for tracking_dumps:', dbError);
     }
     
     // Only check tracking_batch_data if we have no dumps from tracking_dumps
     if (allDumps.size === 0) {
       try {
-        console.log('No dumps in tracking_dumps table, checking tracking_batch_data...');
-        
         const { data: trackingData, error: trackingError } = await supabase
           .from('tracking_batch_data')
           .select('dump')
           .not('dump', 'is', null)
           .order('created_at', { ascending: true });
         
-        if (!trackingError && trackingData && trackingData.length > 0) {
-          console.log(`Found ${trackingData.length} tracking records`);
-          
+        if (trackingError) {
+          console.error('Database query failed for tracking_batch_data:', trackingError);
+        } else if (trackingData && trackingData.length > 0) {
           // Get unique dump names in order they were created
           const uniqueDumps = [];
           const seen = new Set();
@@ -106,8 +102,6 @@ const initializeDumps = async () => {
               uniqueDumps.push(item.dump);
             }
           });
-          
-          console.log(`Found ${uniqueDumps.length} unique dumps in tracking data`);
           
           uniqueDumps.forEach(dumpName => {
             const normalizedName = normalizeDumpName(dumpName);
@@ -125,7 +119,7 @@ const initializeDumps = async () => {
           });
         }
       } catch (dbError) {
-        console.warn('Database query failed for tracking_batch_data:', dbError);
+        console.error('Database query failed for tracking_batch_data:', dbError);
       }
     }
     
@@ -133,9 +127,6 @@ const initializeDumps = async () => {
     
     // Sort by ID to maintain consistent order
     dumpsArray.sort((a, b) => a.id - b.id);
-    
-    console.log(`Loaded ${dumpsArray.length} tracking dumps from database:`, 
-      dumpsArray.map(d => `${d.name} (ID: ${d.id})`));
     
     return dumpsArray;
     
@@ -156,8 +147,6 @@ const loadDumps = async () => {
 // Update all dump counts from database
 const updateAllDumpCounts = async () => {
   try {
-    console.log('Starting updateAllDumpCounts...');
-    
     // Fetch all tracking data in one query
     const { data: allTrackingData, error } = await supabase
       .from('tracking_batch_data')
@@ -168,8 +157,6 @@ const updateAllDumpCounts = async () => {
       console.error('Error fetching tracking data:', error);
       return;
     }
-    
-    console.log(`Fetched ${allTrackingData?.length || 0} tracking records from database`);
     
     // Count deliveries by dump name (case-insensitive)
     const dumpCounts = {};
@@ -191,8 +178,6 @@ const updateAllDumpCounts = async () => {
       }
     });
     
-    console.log('Calculated dump counts from database:', dumpCounts);
-    
     // Update dump counts
     dumps.value.forEach(dump => {
       const lowerKey = dump.name.toLowerCase();
@@ -210,12 +195,6 @@ const updateAllDumpCounts = async () => {
         console.log(`Updated "${dump.name}" count: ${oldCount} → ${dump.itemCount}`);
       }
     });
-    
-    console.log('Final dump counts after update:', dumps.value.map(d => ({
-      name: d.name,
-      itemCount: d.itemCount,
-      containerCount: d.containerCount
-    })));
     
   } catch (error) {
     console.error('Error updating dump counts:', error);
@@ -423,62 +402,6 @@ const deleteDump = async (dumpId, dumpName, event) => {
     loading.value = false;
   }
 };
-
-// Clear all dumps and start fresh
-// const clearAllDumps = async () => {
-//   try {
-//     const confirmed = window.confirm('Are you sure you want to clear ALL tracking dumps and start fresh?\n\nThis will:\n- Delete all tracking dumps from database\n- Delete all tracking data\n- Reset to empty state\n\nThis action cannot be undone.');
-    
-//     if (!confirmed) return;
-    
-//     loading.value = true;
-    
-//     console.log('Clearing all tracking dumps and data...');
-    
-//     // Delete all tracking data
-//     const { error: trackingDataError } = await supabase
-//       .from('tracking_batch_data')
-//       .delete()
-//       .neq('id', 0); // Delete all records
-    
-//     if (trackingDataError) {
-//       console.error('Error deleting tracking data:', trackingDataError);
-//     } else {
-//       console.log('Deleted all tracking data');
-//     }
-    
-//     // Delete all custom dumps
-//     const { error: dumpsError } = await supabase
-//       .from('tracking_dumps')
-//       .delete()
-//       .neq('id', 0); // Delete all records
-    
-//     if (dumpsError) {
-//       console.error('Error deleting tracking dumps:', dumpsError);
-//     } else {
-//       console.log('Deleted all tracking dumps');
-//     }
-    
-//     // Clear local state
-//     dumps.value = [];
-    
-//     ElNotification({
-//       title: 'Success',
-//       message: 'All tracking dumps cleared successfully! You can now add your own dumps.',
-//       type: 'success'
-//     });
-    
-//   } catch (error) {
-//     console.error('Error clearing dumps:', error);
-//     ElNotification({
-//       title: 'Error',
-//       message: 'Failed to clear dumps: ' + error.message,
-//       type: 'error'
-//     });
-//   } finally {
-//     loading.value = false;
-//   }
-// };
 
 // Refresh dump data
 const refreshDumpData = async () => {
