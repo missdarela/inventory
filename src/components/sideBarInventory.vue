@@ -509,14 +509,15 @@ const exportInventory = () => {
   }
 };
 
-// Format money values
+// Format money values with currency symbol
 function formatMoney(value) {
-  if (!value) return '0';
+  if (!value) return '₦0';
   const numericValue = parseFloat(value.toString().replace(/[^\d.]/g, '')) || 0;
-  return numericValue.toLocaleString('en-US', { 
+  const formattedValue = numericValue.toLocaleString('en-US', { 
     minimumFractionDigits: 0, 
     maximumFractionDigits: 0 
   });
+  return `₦${formattedValue}`;
 }
 
 // Capitalize name function
