@@ -278,7 +278,7 @@ async function saveRow(row) {
     // Ensure proper data types and handle null values
     const rowData = {
       batch_id: parseInt(row.batch_id),
-      serial_number: parseInt(row.serial_number),
+      serial_number: row.serial_number ? parseInt(row.serial_number) : null,
       date: row.date || null,
       container_no: row.container_no || '',
       driver: row.driver || '',
@@ -585,7 +585,9 @@ const months = [
               <span><strong>Batch:</strong> {{ currentBatch.batch_number }}</span>
               <span><strong>Washing:</strong> {{ currentBatch.washing_number }}</span>
               <span><strong>Booking:</strong> {{ currentBatch.booking_no }}</span>
-              <span><strong>NXP:</strong> {{ currentBatch.nxp_no }}</span>
+              <span><strong>NXP:</strong> 
+                <input v-model="currentBatch.nxp_no" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter NXP" />
+              </span>
             </div>
           </div>
           

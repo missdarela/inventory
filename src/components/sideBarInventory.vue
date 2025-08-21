@@ -382,7 +382,7 @@ function getAmountRemaining(row) {
 function getQuantityRemaining(row) {
   const quantityDeposited = parseFloat(row.quantity_deposited?.toString().replace(/[^\d.]/g, '')) || 0;
   const quantitySupplied = parseFloat(row.quantity_supplied?.toString().replace(/[^\d.]/g, '')) || 0;
-  const remaining = quantitySupplied - quantityDeposited;
+  const remaining = quantityDeposited - quantitySupplied;
   return remaining >= 0 ? remaining.toString() : '0';
 }
 
