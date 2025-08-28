@@ -582,8 +582,12 @@ const months = [
           <div class="px-6 py-4 border-b border-gray-200">
             <h2 class="text-lg font-semibold text-gray-900">{{ currentBatch.table_name }}</h2>
             <div class="mt-2 flex flex-wrap gap-4 text-sm text-gray-600">
-              <span><strong>Batch:</strong> {{ currentBatch.batch_number }}</span>
-              <span><strong>Washing:</strong> {{ currentBatch.washing_number }}</span>
+              <span><strong>Batch:</strong> 
+                <input v-model="currentBatch.batch_number" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter Batch" />
+              </span>
+              <span><strong>Washing:</strong> 
+                <input v-model="currentBatch.washing_number" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter Washing" />
+              </span>
               <span><strong>Booking:</strong> {{ currentBatch.booking_no }}</span>
               <span><strong>NXP:</strong> 
                 <input v-model="currentBatch.nxp_no" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter NXP" />
