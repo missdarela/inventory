@@ -24,8 +24,8 @@ const capitalizeName = (name) => {
 const batchConfig = ref({
   month: '',
   year: new Date().getFullYear(),
-  bookingNo: '',
-  nxpNo: ''
+  bookingNo: '',  
+  nxpNo: '',  
 });
 
 // Auto-generated counters
@@ -104,8 +104,8 @@ function getOrdinalSuffix(num) {
 
 // Create new batch
 async function createBatch() {
-  if (!batchConfig.value.month || !batchConfig.value.bookingNo || !batchConfig.value.nxpNo) {
-    ElMessage.error('Please fill in all required fields');
+  if (!batchConfig.value.month) {
+    ElMessage.error('Please select a month');
     return;
   }
 
@@ -182,7 +182,7 @@ function resetBatchConfig() {
     month: '',
     year: new Date().getFullYear(),
     bookingNo: '',
-    nxpNo: ''
+    nxpNo: '',
   };
 }
 
@@ -416,6 +416,7 @@ async function handleGenerateReport() {
     const summary = [
       `<h2 class="text-lg font-bold">Tracking Report - ${currentDate}</h2>`,
       `<h3 class="text-sm font-bold">Batch: ${currentBatch.value.table_name}</h3>`,
+      `<h3 class="text-sm font-bold">NXP No: ${currentBatch.value.nxp_no}</h3>`,
       `<h3 class="text-sm font-bold">Batch Number: ${currentBatch.value.batch_number}</h3>`,
       `<h3 class="text-sm font-bold">Washing Number: ${currentBatch.value.washing_number}</h3>`,
       `<h3 class="text-sm font-bold">Booking No: ${currentBatch.value.booking_no}</h3>`,
@@ -568,7 +569,8 @@ const months = [
                   >
                     {{ batch.status }}
                   </span>
-                </div>
+                 <p class="text-xs text-gray-500">NXP: {{ batch.nxp_no }}</p>
+               </div>
                 <p class="text-sm text-gray-600 mb-1">{{ batch.table_name }}</p>
                 <p class="text-xs text-gray-500">Washing: {{ batch.washing_number }}</p>
                 <p class="text-xs text-gray-500">Booking: {{ batch.booking_no }}</p>
@@ -585,12 +587,14 @@ const months = [
               <span><strong>Batch:</strong> 
                 <input v-model="currentBatch.batch_number" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter Batch" />
               </span>
+              <span><strong>NXP:</strong> 
+                <input v-model="currentBatch.nxp_no" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter NXP" />
+              </span>
               <span><strong>Washing:</strong> 
                 <input v-model="currentBatch.washing_number" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter Washing" />
               </span>
-              <span><strong>Booking:</strong> {{ currentBatch.booking_no }}</span>
-              <span><strong>NXP:</strong> 
-                <input v-model="currentBatch.nxp_no" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter NXP" />
+              <span><strong>Booking:</strong> 
+                <input v-model="currentBatch.booking_no" class="border rounded px-2 py-1 ml-1 text-sm w-32" placeholder="Enter Booking" />
               </span>
             </div>
           </div>
@@ -671,24 +675,22 @@ const months = [
               </div>
               
               <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">NXP No.</label>
+                <input v-model="batchConfig.nxpNo" type="text" class="w-full border border-gray-300 rounded-md px-3 py-2" />
+              </div>
+              
+              <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-700 mb-2">Year</label>
                 <input v-model="batchConfig.year" type="number" min="2020" max="2030" class="w-full border border-gray-300 rounded-md px-3 py-2" />
               </div>
               
               <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">Booking No. *</label>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Booking No.</label>
                 <input v-model="batchConfig.bookingNo" type="text" class="w-full border border-gray-300 rounded-md px-3 py-2" />
-              </div>
-              
-              <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">NXP No. *</label>
-                <input v-model="batchConfig.nxpNo" type="text" class="w-full border border-gray-300 rounded-md px-3 py-2" />
               </div>
               
               <div class="mb-4 p-3 bg-gray-50 rounded-md">
                 <p class="text-sm text-gray-600 mb-2"><strong>Preview:</strong></p>
-                <p class="text-xs text-gray-500">Batch Number: {{ generateBatchNumber() }}</p>
-                <p class="text-xs text-gray-500">Washing Number: {{ generateWashingNumber() }}</p>
                 <p class="text-xs text-gray-500" v-if="batchConfig.month">
                   Table Name: {{ generateTableName(generateBatchNumber(), batchConfig.month, batchConfig.year) }}
                 </p>
