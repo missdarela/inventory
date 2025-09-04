@@ -190,9 +190,9 @@ const navigateToDumpDetails = async (dumpId) => {
 const updateAllDumpCounts = async () => {
   loading.value = true;
   try {
-    // Fetch all dump inventory data in one query
+    // Fetch all dump inventory data from dump_inventory table (not inventory table)
     const { data: allInventoryData, error } = await supabase
-      .from('inventory')
+      .from('dump_inventory')
       .select('dump_name, created_at')
       .order('created_at', { ascending: false });
     
@@ -201,7 +201,7 @@ const updateAllDumpCounts = async () => {
       return;
     }
     
-    // Group data by dump name and count items
+    // Group data by normalized dump name and count items
     const dumpCounts = {};
     const dumpLastUpdated = {};
     
@@ -209,26 +209,30 @@ const updateAllDumpCounts = async () => {
       allInventoryData.forEach(item => {
         const dumpName = item.dump_name;
         if (dumpName) {
-          // Count items
-          dumpCounts[dumpName] = (dumpCounts[dumpName] || 0) + 1;
+          // Normalize dump name for consistent matching
+          const normalizedName = normalizeDumpName(dumpName);
+          
+          // Count items using normalized name
+          dumpCounts[normalizedName] = (dumpCounts[normalizedName] || 0) + 1;
           
           // Track most recent update (first item due to ordering)
-          if (!dumpLastUpdated[dumpName]) {
-            dumpLastUpdated[dumpName] = new Date(item.created_at).toISOString().split('T')[0];
+          if (!dumpLastUpdated[normalizedName]) {
+            dumpLastUpdated[normalizedName] = new Date(item.created_at).toISOString().split('T')[0];
           }
         }
       });
     }
     
-    // Update dump counts and last updated dates
+    // Update dump counts and last updated dates using normalized names
     dumps.value.forEach(dump => {
-      dump.itemCount = dumpCounts[dump.name] || 0;
-      if (dumpLastUpdated[dump.name]) {
-        dump.lastUpdated = dumpLastUpdated[dump.name];
+      const normalizedDumpName = normalizeDumpName(dump.name);
+      dump.itemCount = dumpCounts[normalizedDumpName] || 0;
+      if (dumpLastUpdated[normalizedDumpName]) {
+        dump.lastUpdated = dumpLastUpdated[normalizedDumpName];
       }
     });
     
-    console.log('Updated dump counts:', dumpCounts);
+    console.log('Updated dump counts from dump_inventory table (normalized):', dumpCounts);
     
   } catch (error) {
     console.error('Failed to update dump counts:', error);
@@ -587,7 +591,7 @@ onMounted(async () => {
             
             <div class="space-y-3">
               <div class="flex items-center justify-between text-sm">
-                <span class="text-gray-500">Items</span>
+                <span class="text-gray-500">Activity</span>
                 <span class="font-medium text-gray-900">{{ dump.itemCount }}</span>
               </div>
               
