@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue';
 import { supabase } from '../supabase';
 import { ElMessage, ElNotification } from 'element-plus';
 import { useReportStore } from '../stores/reportStore';
+import { useAuthStore } from '../authStore';
 
 const EDIT_WINDOW_MINUTES = 5;
 const inventory = ref([]);
@@ -104,13 +105,18 @@ async function saveRow(row) {
   row.isEditing = false;
   
   const now = new Date();
-  const newEditableUntil = new Date(now.getTime() + EDIT_WINDOW_MINUTES * 60 * 1000).toISOString();
+  // For CEO users, don't set editable_until (always editable)
+  const newEditableUntil = authStore.isCEO ? null : new Date(now.getTime() + EDIT_WINDOW_MINUTES * 60 * 1000).toISOString();
 
-  console.log(`Setting 5-minute lock for row ${row.id}:`, {
-    now: now.toISOString(),
-    editableUntil: newEditableUntil,
-    lockDurationMinutes: EDIT_WINDOW_MINUTES
-  });
+  if (authStore.isCEO) {
+    console.log(`CEO user saving row ${row.id} - no time lock applied`);
+  } else {
+    console.log(`Setting 5-minute lock for row ${row.id}:`, {
+      now: now.toISOString(),
+      editableUntil: newEditableUntil,
+      lockDurationMinutes: EDIT_WINDOW_MINUTES
+    });
+  }
 
   const updates = {
     id: row.id,
@@ -332,7 +338,16 @@ async function checkAccountClosed() {
   // This function is kept for backward compatibility but does nothing
 }
 
+// Initialize auth store
+const authStore = useAuthStore();
+
 function canEdit(row) {
+  // CEO can always edit regardless of time restrictions
+  if (authStore.isCEO) {
+    console.log(`Row ${row.id} is always editable (user is CEO)`);
+    return true;
+  }
+  
   if (row.editable_until === null) {
     console.log(`Row ${row.id} is always editable (editable_until is null)`);
     return true;

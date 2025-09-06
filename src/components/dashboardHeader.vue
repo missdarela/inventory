@@ -17,8 +17,8 @@ const auth = useAuthStore();
         <!-- User profile section -->
         <div class="flex items-center gap-2">
           <el-avatar class="!text-base sm:!text-xl !font-bold !w-8 !h-8 sm:!w-10 sm:!h-10">
-            <template v-if="auth.user && auth.user.username">
-              {{ auth.userProfile.username.charAt(0).toUpperCase() }}
+            <template v-if="auth.userProfile && auth.userProfile.length > 0 && auth.userProfile[0].username">
+              {{ auth.userProfile[0].username.charAt(0).toUpperCase() }}
             </template>
             <template v-else>
               <span class="text-xs">U</span>
@@ -28,7 +28,7 @@ const auth = useAuthStore();
             <el-dropdown>
               <div class="cursor-pointer">
                 <p class="hover:!text-green-600 !text-sm sm:!text-lg !font-semibold truncate max-w-[120px] sm:max-w-none">
-                  {{ auth.userProfile?.username || 'Loading...' }}
+                  {{ auth.isCEO ? 'CEO' : (auth.userProfile && auth.userProfile.length > 0 ? auth.userProfile[0].username : 'Loading...') }}
                 </p>
               </div>
               <template #dropdown>
@@ -41,7 +41,7 @@ const auth = useAuthStore();
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-            <small class="block -mt-1 font-semibold text-gray-500 text-xs">Admin</small>
+            <small class="block -mt-1 font-semibold text-gray-500 text-xs">{{ auth.isCEO ? 'CEO' : 'Admin' }}</small>
           </figcaption>
           
           <!-- Mobile dropdown (avatar only) -->
@@ -55,7 +55,7 @@ const auth = useAuthStore();
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item disabled>
-                    <span class="text-sm font-medium">{{ auth.userProfile?.username || 'User' }}</span>
+                    <span class="text-sm font-medium">{{ auth.isCEO ? 'CEO' : (auth.userProfile?.username || 'User') }}</span>
                   </el-dropdown-item>
                   <el-dropdown-item class="!text-red-600">
                     <span>

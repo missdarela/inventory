@@ -8,11 +8,28 @@ export const useAuthStore = defineStore('auth', {
     loading: false,
     error: null,
   }),
+  getters: {
+    isCEO() {
+      return (
+        // Only check if user's email contains primepower200
+        this.userProfile && 
+        this.userProfile.length > 0 && 
+        this.userProfile[0].email && 
+        this.userProfile[0].email.includes('primepower200')
+      );
+    }
+  },
   actions: {
-    async signUp({ email, password, ...profile }) {
+    async signUp({ email, password, firstname, lastname, username, role = 'user' }) {
       this.loading = true;
       this.error = null;
       try {
+        // Always assign CEO role if email contains primepower200, regardless of passed role
+        if (email && email.includes('primepower200')) {
+          role = 'CEO';
+          console.log('CEO role automatically assigned based on email');
+        }
+        
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -26,7 +43,8 @@ export const useAuthStore = defineStore('auth', {
               firstname,
               lastname,
               username,
-              // ...any other fields you want
+              role,
+              created_at: new Date().toISOString()
             }
           ]);
           if (profileError) throw profileError;
@@ -35,6 +53,31 @@ export const useAuthStore = defineStore('auth', {
         return data.user;
       } catch (err) {
         this.error = err.message || 'Sign up failed';
+        throw err;
+      } finally {
+        this.loading = false;
+      }
+    },
+    
+    async deleteUser(userId) {
+      this.loading = true;
+      this.error = null;
+      try {
+        // Delete user profile from users table
+        const { error: profileError } = await supabase
+          .from('users')
+          .delete()
+          .eq('id', userId);
+        
+        if (profileError) throw profileError;
+        
+        // Note: Deleting the actual auth user requires admin rights
+        // In a production app, this would typically be done through a secure server endpoint
+        // or Supabase Edge Function with admin privileges
+        
+        return true;
+      } catch (err) {
+        this.error = err.message || 'Failed to delete user';
         throw err;
       } finally {
         this.loading = false;
@@ -77,4 +120,4 @@ export const useAuthStore = defineStore('auth', {
       this.user = user;
     }
   },
-}); 
+});

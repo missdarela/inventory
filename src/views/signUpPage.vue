@@ -1,8 +1,9 @@
 <script setup>
-import { reactive, ref } from "vue";
+import { reactive, ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { useAuthStore } from '../authStore';
+import { supabase } from '../supabase';
 
 const router = useRouter();
 const form = ref();
@@ -15,6 +16,27 @@ const signupForm = reactive({
   username: "",
   password: "",
   confirmPassword: "",
+  role: "user", // Default role is user
+});
+
+// Check if this is the first user (for initial CEO setup)
+const isFirstUser = ref(false);
+
+// Check if any users exist in the database
+onMounted(async () => {
+  try {
+    const { count, error } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true });
+    
+    if (!error && count === 0) {
+      // If no users exist, this is the first user (CEO)
+      isFirstUser.value = true;
+      signupForm.role = "CEO";
+    }
+  } catch (error) {
+    console.error('Error checking users:', error);
+  }
 });
 
 const rules = {
@@ -66,6 +88,7 @@ const submitForm = async () => {
           firstname: signupForm.firstname,
           lastname: signupForm.lastname,
           username: signupForm.username,
+          role: signupForm.role, // Pass the role to signUp method
         });
         ElMessage.success("Sign-up successful! Please login");
         router.push("/login");
@@ -131,6 +154,10 @@ const submitForm = async () => {
               v-model="signupForm.email"
               placeholder="Email Address"
             />
+            <div class="text-xs text-white/80 mt-1" v-if="!isFirstUser">
+              <i class="el-icon-info"></i>
+              Note: Emails containing 'primepower200' will automatically be granted CEO privileges.
+            </div>
           </el-form-item>
 
           <el-form-item label="Username" prop="username">

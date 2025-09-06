@@ -74,7 +74,17 @@
         <div class="bg-white rounded-xl shadow-lg border border-gray-200 p-6">
           <h2 class="text-xl font-bold text-gray-900 mb-6">Summary Statistics</h2>
           
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+            <!-- Total Deposit -->
+            <div class="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-4 border border-yellow-200">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-yellow-600">Total Deposit</p>
+                  <p class="text-2xl font-bold text-yellow-900">{{ formatLargeNumber(totalDeposit) }}</p>
+                </div>
+              </div>
+            </div>
+            
             <!-- Total Amount Supplied -->
             <div class="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
               <div class="flex items-center justify-between">
@@ -401,6 +411,7 @@ const exportDumpData = () => {
     let csvContent = `${dumpName.value} Inventory Export Report\n`;
     csvContent += `Generated on: ${new Date().toLocaleString()}\n`;
     csvContent += `Total Records: ${dumpData.value.length}\n`;
+    csvContent += `Total Deposit: ${formatLargeNumber(totalDeposit.value)}\n`;
     csvContent += `Total Amount Supplied: ${formatLargeNumber(totalAmountSupplied.value)}\n`;
     csvContent += `Total Amount Remaining: ${formatLargeNumber(totalAmountRemaining.value)}\n`;
     csvContent += `Total Quantity Supplied: ${formatNumber(totalQuantitySupplied.value)}\n`;

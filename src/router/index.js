@@ -1,11 +1,14 @@
 // src/router/index.js
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../authStore'
+import { supabase } from '../supabase'
 
 const routes = [
   {
      path: '/', 
      name: 'signUp', 
-     component: ()=> import('/src/views/signUpPage.vue')
+     component: ()=> import('/src/views/signUpPage.vue'),
+     meta: { requiresCEO: true } // Mark this route as requiring CEO access
     },
     {
       path: '/login', 
@@ -93,6 +96,12 @@ const routes = [
         name: "tracking",
         component: () => import("../components/sideBarTracking.vue"),
       },
+      {
+        path: "users",
+        name: "users",
+        component: () => import("../components/usersManagement.vue"),
+        meta: { requiresCEO: true } // Only CEO can access this page
+      },
     ]},
      {
       path: '/forgot-password', 
@@ -109,6 +118,40 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(), 
   routes,
+})
+
+// Add navigation guard for protected pages
+router.beforeEach(async (to, from, next) => {
+  // Check if user is authenticated
+  const { data: { user } } = await supabase.auth.getUser()
+  const authStore = useAuthStore()
+  
+  if (user) {
+    // User is authenticated
+    authStore.setUser(user)
+    await authStore.fetchUserProfile()
+    
+    // Check if the route requires CEO access
+    if (to.meta.requiresCEO) {
+      // Only allow CEOs to access CEO-only pages when authenticated
+      if (authStore.isCEO) {
+        next()
+      } else {
+        // Redirect non-CEO users to dashboard
+        next({ name: 'dashboard' })
+      }
+    } else {
+      next()
+    }
+  } else {
+    // User is not authenticated
+    if (to.meta.requiresCEO || to.name === 'signUp') {
+      // Redirect to login page if trying to access protected pages without authentication
+      next({ name: 'login' })
+    } else {
+      next()
+    }
+  }
 })
 
 export default router
