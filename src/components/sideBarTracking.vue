@@ -10,7 +10,7 @@ const currentBatch = ref(null);
 const currentBatchData = ref([]);
 const loading = ref(false);
 const hasGeneratedReport = ref(false);
-const showBatchModal = ref(false);
+const showBatchModal = ref(false)
 
 // Capitalize first letter of each word
 const capitalizeName = (name) => {

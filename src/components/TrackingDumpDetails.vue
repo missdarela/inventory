@@ -70,22 +70,7 @@
             </div>
           </div>
           
-          <div class="grid grid-cols-2 gap-4">
-            <!-- Total Deliveries -->
-            <div class="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-sm font-medium text-blue-600">Total Deliveries</p>
-                  <p class="text-2xl font-bold text-blue-900">{{ dumpStats.totalDeliveries }}</p>
-                </div>
-                <div class="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
-                  <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                  </svg>
-                </div>
-              </div>
-            </div>
-            
+          <div class="grid grid-cols-1 gap-4">
             <!-- Total Containers -->
             <div class="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
               <div class="flex items-center justify-between">
